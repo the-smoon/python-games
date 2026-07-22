@@ -106,23 +106,20 @@ class Player:
         self.alive      = True
         self._frame     = 0
 
-    def update(self, keys):
-        spd = PLAYER_SPEED
-        if keys[pygame.K_LEFT]  or keys[pygame.K_a]:  self.x -= spd
-        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:  self.x += spd
-        if keys[pygame.K_UP]    or keys[pygame.K_w]:  self.y -= spd
-        if keys[pygame.K_DOWN]  or keys[pygame.K_s]:  self.y += spd
-
+    def update(self, mouse_x: float, mouse_y: float):
+        """Snap ship to mouse/touch position, clamped inside the play area."""
         hw = PLAYER_W // 2
-        self.x = max(float(hw), min(float(SCREEN_W - hw), self.x))
-        self.y = max(10.0,      min(float(SCREEN_H - 20), self.y))
+        hh = PLAYER_H // 2
+        self.x = max(float(hw),           min(float(SCREEN_W - hw), float(mouse_x)))
+        self.y = max(float(hh) + 10.0,    min(float(SCREEN_H - hh - 10), float(mouse_y)))
 
         if self.invincible > 0: self.invincible -= 1
         if self.fire_cd    > 0: self.fire_cd    -= 1
         self._frame += 1
 
-    def try_fire(self, keys) -> list:
-        if (keys[pygame.K_SPACE] or keys[pygame.K_z]) and self.fire_cd == 0:
+    def try_fire(self) -> list:
+        """Autofire — caller just invokes every frame; rate is governed by fire_cd."""
+        if self.fire_cd == 0:
             self.fire_cd = FIRE_COOLDOWN
             return [Bullet(self.x, self.y - PLAYER_H // 2)]
         return []

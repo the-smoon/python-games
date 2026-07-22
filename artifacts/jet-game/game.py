@@ -191,10 +191,14 @@ class Game:
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     def run(self):
+        pygame.mouse.set_visible(False)   # cursor hidden; ship follows mouse
         while True:
             self._handle_events()
             self._update()
             self._draw()
+            # Show cursor on menus, hide during play
+            in_game = self.state in ("PLAYING", "BOSS")
+            pygame.mouse.set_visible(not in_game)
             self.clock.tick(FPS)
             self.frame += 1
 
@@ -244,9 +248,9 @@ class Game:
                 self.countdown_timer = FPS
 
     def _update_playing(self):
-        keys = pygame.key.get_pressed()
-        self.player.update(keys)
-        self.bullets.extend(self.player.try_fire(keys))
+        mx, my = pygame.mouse.get_pos()
+        self.player.update(mx, my)
+        self.bullets.extend(self.player.try_fire())
 
         # Song position
         self.song_time = self._song_pos()
@@ -332,9 +336,9 @@ class Game:
             self._begin_boss()
 
     def _update_boss(self):
-        keys = pygame.key.get_pressed()
-        self.player.update(keys)
-        self.bullets.extend(self.player.try_fire(keys))
+        mx, my = pygame.mouse.get_pos()
+        self.player.update(mx, my)
+        self.bullets.extend(self.player.try_fire())
 
         boss_time     = self._song_pos()
         song_progress = boss_time / max(1.0, self.boss_features.duration)
