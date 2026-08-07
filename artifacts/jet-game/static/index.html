@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>AudioStrike</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: #07080f;
+    color: #eee;
+    font-family: 'Courier New', monospace;
+    height: 100%;
+    overflow: hidden;
+    touch-action: none;
+  }
+
+  /* ── Upload Panel ─────────────────────────────────────── */
+  #ui {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 0;
+    z-index: 10;
+    background: #07080f;
+  }
+  #ui h1 {
+    font-size: clamp(2rem, 8vw, 4rem);
+    color: #00e5ff;
+    letter-spacing: 0.12em;
+    text-shadow: 0 0 24px #00e5ffaa;
+    margin-bottom: 6px;
+  }
+  #ui .tagline {
+    color: #556;
+    font-size: clamp(0.75rem, 2.5vw, 1rem);
+    margin-bottom: 32px;
+  }
+  .upload-row {
+    width: min(480px, 90vw);
+    background: #111523;
+    border: 1px solid #223;
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 14px;
+  }
+  .upload-row label {
+    display: block;
+    font-size: 0.78rem;
+    color: #00e5ff;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .upload-row .sub {
+    font-size: 0.7rem;
+    color: #445;
+    margin-bottom: 10px;
+  }
+  .upload-row input[type=file] {
+    width: 100%;
+    background: #0d1020;
+    border: 1px solid #334;
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: #ccc;
+    font-family: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .upload-row input[type=file]::file-selector-button {
+    background: #1a2540;
+    border: 1px solid #00e5ff44;
+    color: #00e5ff;
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-family: inherit;
+    cursor: pointer;
+    margin-right: 8px;
+  }
+  #analyzeBtn {
+    width: min(480px, 90vw);
+    padding: 14px;
+    background: #00e5ff22;
+    border: 1px solid #00e5ff66;
+    border-radius: 10px;
+    color: #00e5ff;
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: bold;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: background 0.2s;
+    margin-top: 4px;
+  }
+  #analyzeBtn:hover { background: #00e5ff44; }
+  #formats {
+    margin-top: 18px;
+    font-size: 0.68rem;
+    color: #334;
+  }
+
+  /* ── Progress Panel ───────────────────────────────────── */
+  #progressPanel {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+  #progressPanel h2 {
+    font-size: clamp(1.2rem, 5vw, 2rem);
+    color: #00e5ff;
+    text-shadow: 0 0 16px #00e5ffaa;
+  }
+  #progressPanel p {
+    color: #556;
+    font-size: 0.82rem;
+  }
+  .bar-track {
+    width: min(400px, 80vw);
+    height: 16px;
+    background: #111523;
+    border: 1px solid #223;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  #progressFill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #00e5ff, #0088ff);
+    border-radius: 8px;
+    transition: width 0.3s;
+  }
+  #progressPct {
+    font-size: 1rem;
+    color: #00e5ff;
+  }
+
+  /* ── Canvas ───────────────────────────────────────────── */
+  #wrap {
+    display: none;
+    position: fixed; inset: 0;
+    align-items: center;
+    justify-content: center;
+    background: #07080f;
+  }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    touch-action: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <!-- Upload state -->
+  <div id="uploadPanel">
+    <h1>AUDIOSTRIKE</h1>
+    <p class="tagline">Music-driven aerial combat</p>
+
+    <div class="upload-row">
+      <label>① Stage Song</label>
+      <div class="sub">Drives enemy count, speed, health &amp; patterns</div>
+      <input type="file" id="stageFile" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus">
+    </div>
+
+    <div class="upload-row">
+      <label>② Boss Song</label>
+      <div class="sub">Plays during the entire boss fight</div>
+      <input type="file" id="bossFile" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus">
+    </div>
+
+    <button id="analyzeBtn" onclick="startAnalysis()">ANALYZE &amp; PLAY</button>
+    <p id="formats">MP3 · WAV · OGG · FLAC · M4A · AAC</p>
+  </div>
+
+  <!-- Analyzing state -->
+  <div id="progressPanel">
+    <h2>ANALYZING MUSIC</h2>
+    <p>Extracting beats, energy &amp; spectral features…</p>
+    <div class="bar-track"><div id="progressFill"></div></div>
+    <span id="progressPct">0%</span>
+    <p id="progressMsg">Stage song…</p>
+  </div>
+</div>
+
+<div id="wrap">
+  <canvas id="game"></canvas>
+</div>
+
+<script>
+"use strict";
+// ═══════════════════════════════════════════════════════════════════════════════
+// Constants
+// ═══════════════════════════════════════════════════════════════════════════════
+const W = 800, H = 600;
+const PLAYER_W = 20, PLAYER_H = 32;
+const BULLET_SPD = 11;
+const FIRE_CD = 15;          // 4 shots/sec at 60 fps
+const MAX_ENEMIES = 20;
+const PLAYER_HEALTH = 5;
+const INVINCIBLE_DUR = 90;   // frames
+const BOSS_RADIUS = 55;
+const BOSS_HP_BASE = 300;
+
+const COL = {
+  bg:        '#07080f',
+  PATROL:    '#4488ff',
+  ZIGZAG:    '#00ccff',
+  FORMATION: '#44ff88',
+  SWARM:     '#ffff44',
+  DIVE:      '#ff8800',
+  SHOOTER:   '#ff4444',
+  TANK:      '#cc44ff',
+  PHASE1:    '#4488ff',
+  PHASE2:    '#ff8800',
+  PHASE3:    '#ff2244',
+  DYING:     '#ffffff',
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Utilities
+// ═══════════════════════════════════════════════════════════════════════════════
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const rand  = (lo, hi) => lo + Math.random() * (hi - lo);
+const rInt  = (lo, hi) => Math.floor(rand(lo, hi + 1));
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Entities
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class Particle {
+  constructor(x, y, color, vx, vy, life) {
+    this.x = x; this.y = y; this.color = color;
+    this.vx = vx; this.vy = vy;
+    this.life = life; this.maxLife = life;
+  }
+  update() { this.x += this.vx; this.y += this.vy; this.vy += 0.09; this.life--; }
+  alive()  { return this.life > 0; }
+  draw(ctx) {
+    ctx.globalAlpha = this.life / this.maxLife;
+    ctx.fillStyle = this.color;
+    ctx.fillRect(this.x - 2, this.y - 2, 4, 4);
+    ctx.globalAlpha = 1;
+  }
+}
+
+class Bullet {
+  constructor(x, y) { this.x = x; this.y = y; this.alive = true; }
+  update() { this.y -= BULLET_SPD; if (this.y < -10) this.alive = false; }
+  draw(ctx) {
+    ctx.fillStyle = '#ffff00';
+    ctx.fillRect(this.x - 1.5, this.y, 3, 10);
+  }
+  rect() { return {x: this.x-1.5, y: this.y, w: 3, h: 10}; }
+}
+
+class EnemyBullet {
+  constructor(x, y, vx, vy) {
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy; this.alive = true;
+  }
+  update() {
+    this.x += this.vx; this.y += this.vy;
+    if (this.y > H+20 || this.y < -20 || this.x < -20 || this.x > W+20) this.alive = false;
+  }
+  draw(ctx) {
+    ctx.fillStyle = '#ff3333';
+    ctx.beginPath(); ctx.arc(this.x, this.y, 4, 0, Math.PI*2); ctx.fill();
+  }
+  rect() { return {x: this.x-4, y: this.y-4, w: 8, h: 8}; }
+}
+
+class Player {
+  constructor() {
+    this.x = W/2; this.y = H - 80;
+    this.health = PLAYER_HEALTH;
+    this.invincible = 0; this.fireCD = 0;
+    this.alive = true; this.frame = 0;
+  }
+  update(mx, my) {
+    this.x = clamp(mx, PLAYER_W/2,     W - PLAYER_W/2);
+    this.y = clamp(my, PLAYER_H/2 + 8, H - PLAYER_H/2 - 8);
+    if (this.invincible > 0) this.invincible--;
+    if (this.fireCD    > 0) this.fireCD--;
+    this.frame++;
+  }
+  tryFire() {
+    if (this.fireCD === 0) {
+      this.fireCD = FIRE_CD;
+      return [new Bullet(this.x, this.y - PLAYER_H/2)];
+    }
+    return [];
+  }
+  takeHit(particles) {
+    if (this.invincible > 0) return;
+    this.health--;
+    this.invincible = INVINCIBLE_DUR;
+    for (let i = 0; i < 14; i++) {
+      const a = rand(0, Math.PI*2), spd = rand(2, 7);
+      particles.push(new Particle(this.x, this.y, '#ff3333',
+        Math.cos(a)*spd, Math.sin(a)*spd, rInt(20, 45)));
+    }
+    if (this.health <= 0) this.alive = false;
+  }
+  draw(ctx) {
+    if (this.invincible > 0 && Math.floor(this.invincible/5) % 2 === 1) return;
+    const {x, y} = this;
+    const hw = PLAYER_W/2, hh = PLAYER_H/2;
+    // Fuselage
+    ctx.fillStyle = '#00ff88';
+    ctx.beginPath(); ctx.roundRect(x-hw, y-hh, PLAYER_W, PLAYER_H, 4); ctx.fill();
+    // Cockpit
+    ctx.fillStyle = '#00ffff';
+    ctx.beginPath(); ctx.roundRect(x-5, y-hh+5, 10, 13, 2); ctx.fill();
+    // Wings
+    ctx.fillStyle = '#00cc66';
+    ctx.beginPath(); ctx.moveTo(x-hw,y+4); ctx.lineTo(x-hw-11,y+20); ctx.lineTo(x-hw,y+20); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x+hw,y+4); ctx.lineTo(x+hw+11,y+20); ctx.lineTo(x+hw,y+20); ctx.fill();
+    // Exhaust
+    const el = 10 + rInt(0, 12);
+    ctx.fillStyle = '#ff8800';
+    ctx.beginPath(); ctx.roundRect(x-5, y+hh, 10, el, 3); ctx.fill();
+    ctx.fillStyle = '#ffff00';
+    ctx.beginPath(); ctx.roundRect(x-3, y+hh, 6, el>>1, 3); ctx.fill();
+  }
+  rect() { return {x: this.x-PLAYER_W/2, y: this.y-PLAYER_H/2, w: PLAYER_W, h: PLAYER_H}; }
+}
+
+class Enemy {
+  constructor(x, y, radius, health, speed, behavior, fireRate) {
+    this.x = x; this.y = y;
+    this.radius = radius; this.health = health; this.maxHealth = health;
+    this.speed = speed; this.behavior = behavior;
+    this.fireRate = fireRate; this.fireTimer = rInt(0, Math.max(1, fireRate));
+    this.alive = true; this.frame = 0;
+    this.zigDir = Math.random() > .5 ? 1 : -1;
+    this.formX = x; this.formY = y;
+    this.diving = false; this.dvx = 0; this.dvy = 0;
+  }
+  update(px, py, eBullets, particles) {
+    this.frame++;
+    const spd = this.speed;
+    switch (this.behavior) {
+      case 'PATROL':
+        this.y += spd;
+        this.x += Math.sin(this.frame * 0.03) * 0.6;
+        break;
+      case 'ZIGZAG':
+        this.y += spd * 0.65;
+        this.x += this.zigDir * spd * 1.6;
+        if (this.x < this.radius || this.x > W - this.radius) this.zigDir *= -1;
+        break;
+      case 'FORMATION':
+        this.formY += spd * 0.4;
+        this.y += (this.formY - this.y) * 0.08;
+        this.x += (this.formX + Math.sin(this.frame * 0.022) * 15 - this.x) * 0.08;
+        break;
+      case 'SWARM': {
+        const dx = px - this.x, dy = py - this.y;
+        const d  = Math.hypot(dx, dy) || 1;
+        this.x += (dx/d)*spd*0.4 + rand(-1.5, 1.5);
+        this.y += spd*0.6 + (dy/d)*spd*0.2;
+        break;
+      }
+      case 'DIVE':
+        if (!this.diving) {
+          this.y += spd * 0.5;
+          if (this.y > 100 && Math.random() < 0.022) {
+            this.diving = true;
+            const dx = px-this.x, dy = py-this.y, d = Math.hypot(dx,dy)||1;
+            this.dvx = dx/d * spd * 3.2;
+            this.dvy = dy/d * spd * 3.2;
+          }
+        } else {
+          this.x += this.dvx; this.y += this.dvy;
+        }
+        break;
+      case 'SHOOTER':
+        this.y += spd * 0.25;
+        if (this.y > 80) this.y += (80 + (this.x/W)*60 - this.y) * 0.03;
+        this.x += Math.sin(this.frame * 0.026) * spd * 0.5;
+        break;
+      case 'TANK':
+        this.y += spd * 0.32;
+        this.x += Math.sin(this.frame * 0.014) * spd * 0.3;
+        break;
+    }
+    // Fire
+    if (this.fireRate > 0 && this.behavior !== 'SWARM' && !this.diving) {
+      this.fireTimer--;
+      if (this.fireTimer <= 0) {
+        this.fireTimer = this.fireRate;
+        const dx = px - this.x, dy = py - this.y, d = Math.hypot(dx,dy)||1;
+        const s = 2.6;
+        if (this.behavior === 'SHOOTER') {
+          for (let i = -1; i <= 1; i++) {
+            const a = Math.atan2(dy,dx) + i * 0.21;
+            eBullets.push(new EnemyBullet(this.x,this.y,Math.cos(a)*s,Math.sin(a)*s));
+          }
+        } else {
+          eBullets.push(new EnemyBullet(this.x,this.y,(dx/d)*s,(dy/d)*s));
+        }
+      }
+    }
+    // Cull
+    if (this.y > H+70 || this.x < -90 || this.x > W+90) this.alive = false;
+  }
+  takeHit(particles) {
+    this.health--;
+    const col = COL[this.behavior] || '#fff';
+    for (let i = 0; i < 5; i++) {
+      const a = rand(0,Math.PI*2), spd = rand(1,4);
+      particles.push(new Particle(this.x,this.y,col,Math.cos(a)*spd,Math.sin(a)*spd,rInt(10,25)));
+    }
+    if (this.health <= 0) {
+      this.alive = false;
+      for (let i = 0; i < 18; i++) {
+        const a = rand(0,Math.PI*2), spd = rand(2,8);
+        particles.push(new Particle(this.x,this.y,col,Math.cos(a)*spd,Math.sin(a)*spd,rInt(25,55)));
+      }
+    }
+  }
+  draw(ctx) {
+    const col = COL[this.behavior] || '#fff';
+    // Body
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Outline ring
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.radius+3, 0, Math.PI*2); ctx.stroke();
+    // Health arc
+    if (this.maxHealth > 1) {
+      const pct = this.health / this.maxHealth;
+      ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.radius-3, -Math.PI/2, -Math.PI/2 + Math.PI*2*pct);
+      ctx.stroke();
+    }
+  }
+  circRect(rect) {
+    const nx = clamp(this.x, rect.x, rect.x+rect.w);
+    const ny = clamp(this.y, rect.y, rect.y+rect.h);
+    const dx = this.x-nx, dy = this.y-ny;
+    return dx*dx + dy*dy <= this.radius*this.radius;
+  }
+}
+
+class Boss {
+  constructor(hp) {
+    this.x = W/2; this.y = -BOSS_RADIUS - 10;
+    this.radius = BOSS_RADIUS;
+    this.health = hp; this.maxHealth = hp;
+    this.phase = 'INTRO';
+    this.frame = 0; this.vx = 1.8;
+    this.fireTimer = 0; this.alive = true; this.dyingTimer = 0;
+  }
+  _calcPhase() {
+    const pct = this.health / this.maxHealth;
+    return pct > 0.66 ? 'PHASE1' : pct > 0.33 ? 'PHASE2' : 'PHASE3';
+  }
+  update(px, py, songProgress, eBullets, particles) {
+    this.frame++;
+    if (this.phase === 'INTRO') {
+      this.y += (100 - this.y) * 0.03;
+      if (this.y >= 98) this.phase = this._calcPhase();
+      return;
+    }
+    if (this.phase === 'DYING') {
+      this.dyingTimer++;
+      if (this.dyingTimer % 4 === 0) {
+        for (let i = 0; i < 12; i++) {
+          const a = rand(0,Math.PI*2), spd = rand(2,9);
+          const col = ['#ff4444','#ff8800','#ffff00','#ffffff'][rInt(0,3)];
+          particles.push(new Particle(
+            this.x+rand(-this.radius,this.radius),
+            this.y+rand(-this.radius,this.radius),
+            col, Math.cos(a)*spd, Math.sin(a)*spd, rInt(30,70)));
+        }
+      }
+      if (this.dyingTimer >= 150) this.alive = false;
+      return;
+    }
+    this.phase = this._calcPhase();
+    if (this.phase === 'PHASE1') {
+      this.x = W/2 + Math.sin(this.frame*0.022) * (W*0.36);
+      this.y = 105 + Math.sin(this.frame*0.013) * 30;
+      this.fireTimer++;
+      if (this.fireTimer >= 80) {
+        this.fireTimer = 0;
+        const dx=px-this.x, dy=py-this.y, d=Math.hypot(dx,dy)||1;
+        eBullets.push(new EnemyBullet(this.x,this.y,(dx/d)*3.2,(dy/d)*3.2));
+      }
+    } else if (this.phase === 'PHASE2') {
+      this.x += this.vx * 2.2;
+      this.y = 110 + Math.sin(this.frame*0.018) * 50;
+      if (this.x < this.radius || this.x > W-this.radius) this.vx *= -1;
+      this.fireTimer++;
+      if (this.fireTimer >= 55) {
+        this.fireTimer = 0;
+        const base = Math.atan2(py-this.y, px-this.x);
+        for (let i = -2; i <= 2; i++) {
+          const a = base + i*0.23;
+          eBullets.push(new EnemyBullet(this.x,this.y,Math.cos(a)*3.4,Math.sin(a)*3.4));
+        }
+      }
+    } else {
+      this.x += (px - this.x) * 0.013;
+      this.y += (Math.min(py-120, 200) - this.y) * 0.009;
+      this.fireTimer++;
+      if (this.fireTimer >= 38) {
+        this.fireTimer = 0;
+        const n = 12;
+        for (let i = 0; i < n; i++) {
+          const a = (i/n)*Math.PI*2 + this.frame*0.06;
+          eBullets.push(new EnemyBullet(this.x,this.y,Math.cos(a)*3,Math.sin(a)*3));
+        }
+      }
+    }
+  }
+  takeHit(particles) {
+    this.health--;
+    for (let i = 0; i < 5; i++) {
+      const a=rand(0,Math.PI*2), spd=rand(2,6);
+      particles.push(new Particle(this.x,this.y,'#ffaa00',Math.cos(a)*spd,Math.sin(a)*spd,rInt(15,30)));
+    }
+    if (this.health <= 0) { this.health = 0; this.phase = 'DYING'; this.dyingTimer = 0; }
+  }
+  isDead() { return !this.alive; }
+  draw(ctx) {
+    const col = COL[this.phase] || '#4488ff';
+    // Glow
+    const grd = ctx.createRadialGradient(this.x,this.y,0,this.x,this.y,this.radius*2.2);
+    grd.addColorStop(0, col+'55'); grd.addColorStop(1, 'transparent');
+    ctx.fillStyle = grd;
+    ctx.beginPath(); ctx.arc(this.x,this.y,this.radius*2.2,0,Math.PI*2); ctx.fill();
+    // Body
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(this.x,this.y,this.radius,0,Math.PI*2); ctx.fill();
+    ctx.globalAlpha = 1;
+    // Rings
+    for (let i = 1; i <= 2; i++) {
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.35/i;
+      ctx.beginPath(); ctx.arc(this.x,this.y,this.radius+i*14,0,Math.PI*2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Spawner
+// ═══════════════════════════════════════════════════════════════════════════════
+class Spawner {
+  constructor(features) {
+    this.f = features;
+    this.beatIdx = 0;
+  }
+  _featAt(t) {
+    const times = this.f.frame_times;
+    let lo=0, hi=times.length-1, idx=0;
+    while (lo<=hi) { const m=(lo+hi)>>1; if(times[m]<=t){idx=m;lo=m+1;}else hi=m-1; }
+    return {
+      rms: this.f.rms[idx], centroid: this.f.centroid[idx],
+      flatness: this.f.flatness[idx], onset: this.f.onset[idx],
+      low: this.f.low_energy[idx], mid: this.f.mid_energy[idx],
+      high: this.f.high_energy[idx],
+    };
+  }
+  _behavior(f) {
+    if (f.onset > 0.85 && f.high > 0.5) return 'DIVE';
+    if (f.onset > 0.75)                  return 'SWARM';
+    if (f.low > 0.7)                     return 'TANK';
+    if (f.mid > 0.6 && f.rms > 0.4)     return 'SHOOTER';
+    if (f.flatness < 0.3 && f.rms > 0.35) return 'FORMATION';
+    if (f.centroid > 0.6)                return 'ZIGZAG';
+    return 'PATROL';
+  }
+  update(songTime) {
+    const out = [];
+    const beats = this.f.beat_times;
+    while (this.beatIdx < beats.length && beats[this.beatIdx] <= songTime) {
+      const t = beats[this.beatIdx++];
+      const f = this._featAt(t);
+      if (f.rms < 0.12 && f.onset < 0.15) continue;   // quiet beat — skip
+      let count = 1 + Math.floor(f.rms * 3);
+      if (f.onset > 0.88) count = Math.min(count + 2, 4);
+      count = Math.min(count, 4);
+      const beh = this._behavior(f);
+      const radius   = 10 + f.low * 34;
+      const health   = 1 + Math.round(f.low * 6);
+      const speed    = 1.3 + f.high * 3.8;
+      const fireRate = f.mid > 0.4 ? Math.round(90 - f.mid*50) : 0;
+      for (let i = 0; i < count; i++) {
+        const x = beh === 'FORMATION'
+          ? (W / (count+1)) * (i+1)
+          : rand(radius+20, W-radius-20);
+        out.push(new Enemy(x, -radius-10, radius, health, speed, beh, fireRate));
+      }
+    }
+    return out;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Game
+// ═══════════════════════════════════════════════════════════════════════════════
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+canvas.width = W; canvas.height = H;
+
+// Scale canvas to fit screen while preserving aspect ratio
+function resize() {
+  const sw = window.innerWidth, sh = window.innerHeight;
+  const scale = Math.min(sw / W, sh / H);
+  canvas.style.width  = Math.floor(W * scale) + 'px';
+  canvas.style.height = Math.floor(H * scale) + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Stars
+const stars = Array.from({length: 130}, () => ({
+  x: rand(0,W), y: rand(0,H), size: rInt(1,3), bright: rand(0.25, 1)
+}));
+
+// ── Game state ────────────────────────────────────────────────────────────────
+let state = 'UPLOAD';
+let stageFeatures = null, bossFeatures = null;
+let stageAudio, bossAudio;
+let player, enemies, bullets, eBullets, particles, boss, spawner;
+let score = 0, frame = 0;
+let stageDone = false, waitingForClear = false;
+let countdown = 3, countdownTimer = 0;
+let bossIntroTimer = 0, victoryTimer = 0;
+let beatFlash = 0, beatIdx = 0;
+let currentBehavior = '';
+let songStartMs = 0, bossStartMs = 0;
+
+function songTime()  { return (performance.now() - songStartMs)  / 1000; }
+function bossTime()  { return (performance.now() - bossStartMs)  / 1000; }
+function curTime()   { return state === 'BOSS' ? bossTime() : songTime(); }
+
+// ── Mouse / Touch ─────────────────────────────────────────────────────────────
+let mouseX = W/2, mouseY = H - 80;
+
+function updatePointer(cx, cy) {
+  const r = canvas.getBoundingClientRect();
+  const sx = W / r.width, sy = H / r.height;
+  mouseX = (cx - r.left) * sx;
+  mouseY = (cy - r.top)  * sy;
+}
+canvas.addEventListener('mousemove', e => updatePointer(e.clientX, e.clientY));
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault(); updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+}, {passive: false});
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault(); updatePointer(e.touches[0].clientX, e.touches[0].clientY);
+  if (state === 'GAME_OVER' || state === 'VICTORY') beginCountdown();
+}, {passive: false});
+canvas.addEventListener('click', () => {
+  if (state === 'GAME_OVER' || state === 'VICTORY') beginCountdown();
+});
+
+// ── State transitions ─────────────────────────────────────────────────────────
+function beginCountdown() {
+  state = 'COUNTDOWN'; countdown = 3; countdownTimer = 62;
+  player = new Player();
+  enemies = []; bullets = []; eBullets = []; particles = [];
+  boss = null; score = 0; frame = 0;
+  stageDone = false; waitingForClear = false;
+  beatFlash = 0; beatIdx = 0; currentBehavior = '';
+  spawner = new Spawner(stageFeatures);
+}
+function beginPlaying() {
+  state = 'PLAYING';
+  stageAudio.currentTime = 0;
+  stageAudio.play().catch(() => {});
+  songStartMs = performance.now();
+}
+function beginBossIntro() {
+  state = 'BOSS_INTRO'; bossIntroTimer = 180;
+  enemies = []; eBullets = [];
+  try { stageAudio.pause(); } catch(e) {}
+}
+function beginBoss() {
+  state = 'BOSS';
+  const mean = bossFeatures.rms.reduce((a,b) => a+b, 0) / bossFeatures.rms.length;
+  boss = new Boss(Math.max(150, Math.round(BOSS_HP_BASE * (0.5 + mean))));
+  bullets = []; eBullets = [];
+  beatIdx = 0; beatFlash = 0;
+  bossAudio.currentTime = 0;
+  bossAudio.play().catch(() => {});
+  bossStartMs = performance.now();
+}
+function gameOver() {
+  state = 'GAME_OVER';
+  try { stageAudio.pause(); bossAudio.pause(); } catch(e) {}
+}
+function victory() {
+  state = 'VICTORY'; victoryTimer = 380;
+  try { bossAudio.pause(); } catch(e) {}
+}
+
+// ── Collision helpers ─────────────────────────────────────────────────────────
+function rectsOverlap(a, b) {
+  return !(a.x+a.w < b.x || b.x+b.w < a.x || a.y+a.h < b.y || b.y+b.h < a.y);
+}
+
+// ── Beat flash ────────────────────────────────────────────────────────────────
+function tickBeat(features) {
+  const bt = features.beat_times;
+  const t  = curTime();
+  while (beatIdx < bt.length && bt[beatIdx] <= t) { beatFlash = 8; beatIdx++; }
+  if (beatFlash > 0) beatFlash--;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Update
+// ═══════════════════════════════════════════════════════════════════════════════
+function update() {
+  frame++;
+
+  if (state === 'COUNTDOWN') {
+    if (--countdownTimer <= 0) {
+      if (--countdown <= 0) beginPlaying();
+      else countdownTimer = 62;
+    }
+    return;
+  }
+
+  if (state === 'BOSS_INTRO') {
+    for (const p of particles) p.update();
+    particles = particles.filter(p => p.alive());
+    if (--bossIntroTimer <= 0) beginBoss();
+    return;
+  }
+
+  if (state === 'VICTORY') {
+    if (--victoryTimer > 0) {
+      for (const p of particles) p.update();
+      particles = particles.filter(p => p.alive());
+      if (frame % 7 === 0) {
+        const x = rand(80, W-80), y = rand(60, H-250);
+        const col = ['#ff4444','#ff8800','#ffff44','#44ff88','#00ffff','#cc44ff','#ff44cc'][rInt(0,6)];
+        for (let i = 0; i < 18; i++) {
+          const a = rand(0,Math.PI*2), spd = rand(2,9);
+          particles.push(new Particle(x,y,col,Math.cos(a)*spd,Math.sin(a)*spd,rInt(35,80)));
+        }
+      }
+    }
+    return;
+  }
+
+  if (state !== 'PLAYING' && state !== 'BOSS') return;
+
+  player.update(mouseX, mouseY);
+  bullets.push(...player.tryFire());
+
+  if (state === 'PLAYING') {
+    tickBeat(stageFeatures);
+    // Spawn
+    if (!stageDone) {
+      const newE = spawner.update(songTime());
+      const slots = MAX_ENEMIES - enemies.length;
+      if (newE.length) { enemies.push(...newE.slice(0, Math.max(0,slots))); currentBehavior = newE.at(-1).behavior; }
+    }
+    // Stage end
+    if (!stageDone && songTime() >= stageFeatures.duration) {
+      stageDone = true; waitingForClear = true;
+    }
+    // Update enemies
+    for (const e of enemies) e.update(player.x, player.y, eBullets, particles);
+    // Player bullets → enemies
+    for (const b of bullets) {
+      if (!b.alive) continue;
+      for (const e of enemies) {
+        if (!e.alive) continue;
+        if (e.circRect(b.rect())) { b.alive=false; e.takeHit(particles); score+=100; break; }
+      }
+    }
+    // Enemy bullets → player
+    const pr = player.rect();
+    for (const eb of eBullets) {
+      if (!eb.alive) continue;
+      if (rectsOverlap(pr, eb.rect())) { player.takeHit(particles); eb.alive=false; }
+    }
+    // Enemy bodies → player
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      if (e.circRect(pr)) { player.takeHit(particles); e.health=0; e.alive=false; }
+    }
+    enemies = enemies.filter(e => e.alive);
+    if (!player.alive) { gameOver(); return; }
+    if (waitingForClear && enemies.length === 0) { beginBossIntro(); return; }
+  }
+
+  if (state === 'BOSS') {
+    tickBeat(bossFeatures);
+    const prog = bossTime() / Math.max(1, bossFeatures.duration);
+    if (boss) boss.update(player.x, player.y, prog, eBullets, particles);
+    // Player bullets → boss
+    if (boss && boss.phase !== 'INTRO' && boss.phase !== 'DYING') {
+      const r2 = boss.radius * boss.radius;
+      for (const b of bullets) {
+        if (!b.alive) continue;
+        const dx=b.x-boss.x, dy=b.y-boss.y;
+        if (dx*dx+dy*dy <= r2) { b.alive=false; boss.takeHit(particles); score+=10; }
+      }
+    }
+    // Enemy bullets → player
+    const pr2 = player.rect();
+    for (const eb of eBullets) {
+      if (!eb.alive) continue;
+      if (rectsOverlap(pr2, eb.rect())) { player.takeHit(particles); eb.alive=false; }
+    }
+    if (!player.alive) { gameOver(); return; }
+    if (boss && boss.isDead()) { score += 5000; victory(); return; }
+  }
+
+  // Update projectiles + particles
+  for (const b  of bullets)    b.update();
+  for (const eb of eBullets)   eb.update();
+  for (const p  of particles)  p.update();
+  bullets   = bullets.filter(b  => b.alive);
+  eBullets  = eBullets.filter(eb => eb.alive);
+  particles = particles.filter(p  => p.alive());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Draw
+// ═══════════════════════════════════════════════════════════════════════════════
+function drawBg() {
+  ctx.fillStyle = COL.bg;
+  ctx.fillRect(0, 0, W, H);
+  // Stars
+  for (const s of stars) {
+    const sy = (s.y + frame * 0.4) % H;
+    const lum = Math.round(255 * s.bright);
+    ctx.fillStyle = `rgb(${lum},${lum},${lum})`;
+    ctx.beginPath(); ctx.arc(s.x, sy, s.size, 0, Math.PI*2); ctx.fill();
+  }
+  // Beat pulse
+  if (beatFlash > 0) {
+    ctx.fillStyle = `rgba(${beatFlash*6},${beatFlash*6},0,${beatFlash/55})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function drawHUD() {
+  // Hull pips
+  ctx.fillStyle = '#00ff88';
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText('HULL', 10, 22);
+  for (let i = 0; i < PLAYER_HEALTH; i++) {
+    ctx.fillStyle = i < player.health ? '#00ff88' : '#1a3322';
+    ctx.fillRect(58 + i*18, 10, 14, 14);
+  }
+  // Score
+  ctx.fillStyle = '#00ffff';
+  ctx.font = 'bold 15px monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText(score.toLocaleString(), W-10, 24);
+  ctx.textAlign = 'left';
+  // Behavior label
+  if (currentBehavior && state === 'PLAYING') {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(8, H-34, 168, 22);
+    ctx.fillStyle = COL[currentBehavior] || '#fff';
+    ctx.font = '12px monospace';
+    ctx.fillText(`MODE: ${currentBehavior}`, 14, H-18);
+  }
+  // Enemies remaining after stage
+  if (waitingForClear && enemies.length > 0) {
+    ctx.fillStyle = '#ffff44';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`CLEAR REMAINING: ${enemies.length}`, W/2, 30);
+    ctx.textAlign = 'left';
+  }
+}
+
+function drawBossBar() {
+  if (!boss || boss.phase === 'INTRO' || boss.phase === 'DYING') return;
+  const bw=W-40, bh=12, bx=20, by=H-28;
+  ctx.fillStyle = '#222'; ctx.fillRect(bx, by, bw, bh);
+  const col = COL[boss.phase] || '#ff2244';
+  ctx.fillStyle = col;
+  ctx.fillRect(bx, by, bw*(boss.health/boss.maxHealth), bh);
+  ctx.strokeStyle='#555'; ctx.lineWidth=1; ctx.strokeRect(bx,by,bw,bh);
+  ctx.fillStyle=col; ctx.font='bold 11px monospace';
+  ctx.textAlign='center'; ctx.fillText('BOSS', W/2, by-3); ctx.textAlign='left';
+}
+
+function draw() {
+  drawBg();
+
+  if (state === 'COUNTDOWN') {
+    ctx.fillStyle = '#aaa'; ctx.font='bold 18px monospace'; ctx.textAlign='center';
+    ctx.fillText('GET READY', W/2, H/2-50);
+    ctx.fillStyle = '#00ffff'; ctx.font='bold 72px monospace';
+    ctx.fillText(countdown, W/2, H/2+24);
+    ctx.textAlign='left'; return;
+  }
+
+  if (state === 'BOSS_INTRO') {
+    for (const p of particles) p.draw(ctx);
+    const pulse = 0.82 + 0.18*Math.sin(frame*0.16);
+    ctx.globalAlpha = pulse;
+    ctx.fillStyle='#ff3333'; ctx.font='bold 64px monospace'; ctx.textAlign='center';
+    ctx.fillText('BOSS', W/2, H/2-12);
+    ctx.globalAlpha=1;
+    ctx.fillStyle='#ff8800'; ctx.font='bold 20px monospace';
+    ctx.fillText('INCOMING', W/2, H/2+32);
+    ctx.textAlign='left'; return;
+  }
+
+  if (state === 'GAME_OVER') {
+    ctx.fillStyle='#ff3333'; ctx.font='bold 60px monospace'; ctx.textAlign='center';
+    ctx.fillText('GAME OVER', W/2, H/2-44);
+    ctx.fillStyle='#ffff44'; ctx.font='bold 20px monospace';
+    ctx.fillText(`SCORE: ${score.toLocaleString()}`, W/2, H/2+8);
+    ctx.fillStyle='#556'; ctx.font='15px monospace';
+    ctx.fillText('Tap to restart', W/2, H/2+48);
+    ctx.textAlign='left'; return;
+  }
+
+  if (state === 'VICTORY') {
+    for (const p of particles) p.draw(ctx);
+    ctx.fillStyle='#ffff44'; ctx.font='bold 56px monospace'; ctx.textAlign='center';
+    ctx.fillText('VICTORY!', W/2, H/2-44);
+    ctx.fillStyle='#00ff88'; ctx.font='bold 22px monospace';
+    ctx.fillText(`FINAL SCORE: ${score.toLocaleString()}`, W/2, H/2+8);
+    ctx.fillStyle='#556'; ctx.font='15px monospace';
+    ctx.fillText('Tap to play again', W/2, H/2+50);
+    ctx.textAlign='left'; return;
+  }
+
+  if (state !== 'PLAYING' && state !== 'BOSS') return;
+
+  for (const p  of particles) p.draw(ctx);
+  for (const e  of enemies)   e.draw(ctx);
+  if (boss) boss.draw(ctx);
+  for (const b  of bullets)   b.draw(ctx);
+  for (const eb of eBullets)  eb.draw(ctx);
+  player.draw(ctx);
+  drawHUD();
+  if (state === 'BOSS') drawBossBar();
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Upload + Analysis flow
+// ═══════════════════════════════════════════════════════════════════════════════
+async function startAnalysis() {
+  const stageFile = document.getElementById('stageFile').files[0];
+  const bossFile  = document.getElementById('bossFile').files[0];
+  if (!stageFile || !bossFile) {
+    alert('Please select both audio files first.');
+    return;
+  }
+
+  // Build Audio objects from local files (no server roundtrip for playback)
+  stageAudio = new Audio(URL.createObjectURL(stageFile));
+  bossAudio  = new Audio(URL.createObjectURL(bossFile));
+  stageAudio.preload = 'auto';
+  bossAudio.preload  = 'auto';
+
+  // Show progress UI
+  document.getElementById('uploadPanel').style.display  = 'none';
+  document.getElementById('progressPanel').style.display = 'flex';
+
+  const fd = new FormData();
+  fd.append('stage', stageFile);
+  fd.append('boss',  bossFile);
+
+  try {
+    const r1 = await fetch('/api/upload', {method:'POST', body: fd});
+    if (!r1.ok) throw new Error(await r1.text());
+    const {session_id} = await r1.json();
+
+    // Poll until done
+    while (true) {
+      await new Promise(r => setTimeout(r, 400));
+      const r2 = await fetch(`/api/status/${session_id}`);
+      const {status, progress} = await r2.json();
+      document.getElementById('progressFill').style.width = (progress*100) + '%';
+      document.getElementById('progressPct').textContent  = Math.round(progress*100) + '%';
+      document.getElementById('progressMsg').textContent  =
+        progress < 0.5 ? 'Stage song…' : 'Boss song…';
+      if (status === 'ready') break;
+      if (status === 'error') throw new Error('Analysis failed — check server logs.');
+    }
+
+    // Fetch features
+    const r3 = await fetch(`/api/features/${session_id}`);
+    const data = await r3.json();
+    stageFeatures = data.stage;
+    bossFeatures  = data.boss;
+
+    // Switch to game
+    document.getElementById('ui').style.display   = 'none';
+    document.getElementById('wrap').style.display = 'flex';
+    resize();
+    beginCountdown();
+    loop();
+
+  } catch (err) {
+    alert('Error: ' + err.message);
+    document.getElementById('uploadPanel').style.display  = '';
+    document.getElementById('progressPanel').style.display = 'none';
+  }
+}
+</script>
+</body>
+</html>
