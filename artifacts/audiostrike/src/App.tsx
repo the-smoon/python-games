@@ -407,7 +407,7 @@ function Home() {
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [syncState]);
+  }, [state, syncState]);
 
   useEffect(() => () => resetAudio(), [resetAudio]);
 

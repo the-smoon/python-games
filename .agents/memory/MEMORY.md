@@ -1,1 +1,2 @@
 - [AudioStrike preview routing](audiostrike-preview-routing.md) — browser game must use a managed root web artifact for reliable Replit and mobile preview access.
+- [Canvas game loop lifecycle](audiostrike-preview-routing.md) — start animation effects after conditional game canvas mounts, not only on initial upload screen.
