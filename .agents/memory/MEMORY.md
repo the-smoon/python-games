@@ -1,0 +1,1 @@
+- [AudioStrike preview routing](audiostrike-preview-routing.md) — browser game must use a managed root web artifact for reliable Replit and mobile preview access.
