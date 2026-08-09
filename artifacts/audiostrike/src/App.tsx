@@ -27,10 +27,10 @@ type BossEntity = { x: number; y: number; radius: number; health: number; maxHea
 const W = 800;
 const H = 600;
 const PLAYER_MAX_HEALTH = 100;
-const PLAYER_BULLET_SPEED = 17;
-const BULLET_TIME_SCALE = 0.09;
+const PLAYER_BULLET_SPEED = 25;
+const BULLET_TIME_SCALE = 0.14;
 const ENEMY_MOTION_TIME_SCALE = 0.085;
-const ENEMY_BULLET_TIME_SCALE = 0.09;
+const ENEMY_BULLET_TIME_SCALE = 0.14;
 const PLAYER_W = 20;
 const PLAYER_H = 32;
 const COLORS: Record<string, string> = {
@@ -118,6 +118,13 @@ function drawPlayer(ctx: CanvasRenderingContext2D, x: number, y: number, frame: 
   ctx.moveTo(x - halfW, y + 4); ctx.lineTo(x - halfW - 12, y + 20); ctx.lineTo(x - halfW, y + 20); ctx.fill();
   ctx.beginPath();
   ctx.moveTo(x + halfW, y + 4); ctx.lineTo(x + halfW + 12, y + 20); ctx.lineTo(x + halfW, y + 20); ctx.fill();
+  // Wing-mounted weapon pods
+  ctx.fillStyle = '#7dffcf';
+  ctx.fillRect(x - halfW - 4, y - 8, 6, 12);
+  ctx.fillRect(x + halfW - 2, y - 8, 6, 12);
+  ctx.fillStyle = '#00ffff';
+  ctx.fillRect(x - halfW - 3, y - 9, 4, 5);
+  ctx.fillRect(x + halfW - 1, y - 9, 4, 5);
   const exhaust = 10 + Math.floor((frame % 14) * .8);
   ctx.fillStyle = '#ff8800';
   ctx.beginPath(); ctx.roundRect(x - 5, y + halfH, 10, exhaust, 3); ctx.fill();
@@ -302,7 +309,14 @@ function Home() {
       player.frame += 1;
       player.invincible = Math.max(0, player.invincible - delta);
       player.fireTimer -= delta;
-      if (player.fireTimer <= 0) { game.bullets.push({ x: player.x, y: player.y - 18, vy: -PLAYER_BULLET_SPEED, alive: true }); player.fireTimer = 15; }
+      if (player.fireTimer <= 0) {
+        const gunY = player.y - 18;
+        game.bullets.push(
+          { x: player.x - 10, y: gunY, vy: -PLAYER_BULLET_SPEED, alive: true },
+          { x: player.x + 10, y: gunY, vy: -PLAYER_BULLET_SPEED, alive: true },
+        );
+        player.fireTimer = 15;
+      }
       if (game.state === 'PLAYING') {
         const features = game.stageFeatures ?? makeFeatures(42, 1);
         const songTime = getGameTime();
@@ -342,8 +356,8 @@ function Home() {
             if (enemy.fireTimer <= 0) {
               enemy.fireTimer = enemy.fireRate;
               const dx = player.x - enemy.x, dy = player.y - enemy.y, distance = Math.hypot(dx, dy) || 1;
-              if (enemy.behavior === 'SHOOTER') { const angle = Math.atan2(dy, dx); game.enemyBullets.push({ x: enemy.x, y: enemy.y, vx: Math.cos(angle) * 3.7, vy: Math.sin(angle) * 3.7, damage: 4, alive: true }); }
-              else game.enemyBullets.push({ x: enemy.x, y: enemy.y, vx: dx / distance * 3.7, vy: dy / distance * 3.7, damage: enemy.behavior === 'TANK' ? 9 : 6, alive: true });
+              if (enemy.behavior === 'SHOOTER') { const angle = Math.atan2(dy, dx); game.enemyBullets.push({ x: enemy.x, y: enemy.y, vx: Math.cos(angle) * 5.8, vy: Math.sin(angle) * 5.8, damage: 4, alive: true }); }
+              else game.enemyBullets.push({ x: enemy.x, y: enemy.y, vx: dx / distance * 5.8, vy: dy / distance * 5.8, damage: enemy.behavior === 'TANK' ? 9 : 6, alive: true });
             }
           }
           if (enemy.y > H + 70 || enemy.x < -90 || enemy.x > W + 90) enemy.alive = false;
@@ -358,14 +372,24 @@ function Home() {
         else {
           const healthRatio = boss.health / boss.maxHealth;
           boss.phase = healthRatio > .66 ? 'PHASE1' : healthRatio > .33 ? 'PHASE2' : 'PHASE3';
-        if (boss.phase === 'PHASE1') { boss.x = W / 2 + Math.sin(boss.frame * .022) * (W * .36); boss.y = 105 + Math.sin(boss.frame * .013) * 30; boss.fireTimer += delta; if (boss.fireTimer >= 105) { boss.fireTimer = 0; const dx = player.x - boss.x, dy = player.y - boss.y, distance = Math.hypot(dx, dy) || 1; game.enemyBullets.push({ x: boss.x, y: boss.y, vx: dx / distance * 4.5, vy: dy / distance * 4.5, damage: 8, alive: true }); } }
-          else if (boss.phase === 'PHASE2') { boss.x += boss.vx * 2.5 * delta * .075; boss.y = 110 + Math.sin(boss.frame * .018) * 50; if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1; boss.fireTimer += delta; if (boss.fireTimer >= 78) { boss.fireTimer = 0; const base = Math.atan2(player.y - boss.y, player.x - boss.x); for (let spread = -1; spread <= 1; spread += 1) { const angle = base + spread * .23; game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 4.7, vy: Math.sin(angle) * 4.7, damage: 5, alive: true }); } } }
-          else { boss.x += (player.x - boss.x) * .016 * delta; boss.y += (Math.min(player.y - 120, 200) - boss.y) * .011 * delta; boss.fireTimer += delta; if (boss.fireTimer >= 55) { boss.fireTimer = 0; for (let ray = 0; ray < 8; ray += 1) { const angle = (ray / 8) * Math.PI * 2 + boss.frame * .06; game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 4.4, vy: Math.sin(angle) * 4.4, damage: 3, alive: true }); } } }
+        if (boss.phase === 'PHASE1') { boss.x = W / 2 + Math.sin(boss.frame * .022) * (W * .36); boss.y = 105 + Math.sin(boss.frame * .013) * 30; boss.fireTimer += delta; if (boss.fireTimer >= 105) { boss.fireTimer = 0; const dx = player.x - boss.x, dy = player.y - boss.y, distance = Math.hypot(dx, dy) || 1; game.enemyBullets.push({ x: boss.x, y: boss.y, vx: dx / distance * 6.8, vy: dy / distance * 6.8, damage: 8, alive: true }); } }
+          else if (boss.phase === 'PHASE2') { boss.x += boss.vx * 2.5 * delta * .075; boss.y = 110 + Math.sin(boss.frame * .018) * 50; if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1; boss.fireTimer += delta; if (boss.fireTimer >= 78) { boss.fireTimer = 0; const base = Math.atan2(player.y - boss.y, player.x - boss.x); for (let spread = -1; spread <= 1; spread += 1) { const angle = base + spread * .23; game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 7.1, vy: Math.sin(angle) * 7.1, damage: 5, alive: true }); } } }
+          else { boss.x += (player.x - boss.x) * .016 * delta; boss.y += (Math.min(player.y - 120, 200) - boss.y) * .011 * delta; boss.fireTimer += delta; if (boss.fireTimer >= 55) { boss.fireTimer = 0; for (let ray = 0; ray < 8; ray += 1) { const angle = (ray / 8) * Math.PI * 2 + boss.frame * .06; game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 6.6, vy: Math.sin(angle) * 6.6, damage: 3, alive: true }); } } }
         }
       }
       for (const bullet of game.bullets) { bullet.y += bullet.vy * delta * BULLET_TIME_SCALE; if (bullet.y < -20) bullet.alive = false; }
       for (const bullet of game.enemyBullets) { bullet.x += bullet.vx * delta * ENEMY_BULLET_TIME_SCALE; bullet.y += bullet.vy * delta * ENEMY_BULLET_TIME_SCALE; if (bullet.y > H + 20 || bullet.y < -20 || bullet.x < -20 || bullet.x > W + 20) bullet.alive = false; }
       for (const bullet of game.bullets) {
+        if (!bullet.alive) continue;
+        for (const enemyBullet of game.enemyBullets) {
+          if (!enemyBullet.alive) continue;
+          if (Math.hypot(bullet.x - enemyBullet.x, bullet.y - enemyBullet.y) <= 9) {
+            bullet.alive = false;
+            enemyBullet.alive = false;
+            spawnParticles(game.particles, enemyBullet.x, enemyBullet.y, '#00ffff', 5, 1, 4);
+            break;
+          }
+        }
         if (!bullet.alive) continue;
         for (const enemy of game.enemies) {
           if (!enemy.alive) continue;
