@@ -5,14 +5,28 @@ type GameState = 'UPLOAD' | 'ANALYZING' | 'COUNTDOWN' | 'PLAYING' | 'BOSS_INTRO'
 type Behavior = 'PATROL' | 'ZIGZAG' | 'FORMATION' | 'SWARM' | 'DIVE' | 'SHOOTER' | 'TANK';
 type FeatureSet = {
   duration: number;
-  beat_times: number[];
-  rms: number[];
-  onset: number[];
-  low_energy: number[];
-  mid_energy: number[];
-  high_energy: number[];
-  centroid: number[];
-  flatness: number[];
+};
+type LiveFeatures = {
+  rms: number;
+  onset: number;
+  low: number;
+  mid: number;
+  high: number;
+  centroid: number;
+  flatness: number;
+  pulse: boolean;
+};
+type AudioReactiveTrack = {
+  element: HTMLAudioElement;
+  analyser: AnalyserNode;
+  source: MediaElementAudioSourceNode;
+  frequencies: Uint8Array<ArrayBuffer>;
+  waveform: Uint8Array<ArrayBuffer>;
+  previousSpectrum: Float32Array<ArrayBuffer>;
+  energyBaseline: number;
+  lastTime: number;
+  lastPulseAt: number;
+  lastFeatures: LiveFeatures;
 };
 type EnemyEntity = {
   x: number; y: number; radius: number; health: number; maxHealth: number; speed: number;
@@ -41,31 +55,6 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 const random = (min: number, max: number) => min + Math.random() * (max - min);
 const randomInt = (min: number, max: number) => Math.floor(random(min, max + 1));
 
-function makeFeatures(duration: number, seed: number): FeatureSet {
-  const safeDuration = clamp(duration || 42, 18, 180);
-  const beat_times: number[] = [];
-  const rms: number[] = [];
-  const onset: number[] = [];
-  const low_energy: number[] = [];
-  const mid_energy: number[] = [];
-  const high_energy: number[] = [];
-  const centroid: number[] = [];
-  const flatness: number[] = [];
-  const beatStep = 0.48 + (seed % 4) * 0.045;
-  for (let time = 0; time < safeDuration; time += beatStep) {
-    const wave = (Math.sin(time * 1.7 + seed) + Math.sin(time * 0.37) + 2) / 4;
-    beat_times.push(Number(time.toFixed(3)));
-    rms.push(clamp(.28 + wave * .5 + Math.sin(time * .09) * .12, .12, .96));
-    onset.push(clamp(.18 + Math.abs(Math.sin(time * 2.2 + seed)) * .75, .08, .98));
-    low_energy.push(clamp(.25 + Math.abs(Math.sin(time * .63 + seed)) * .7, .12, .96));
-    mid_energy.push(clamp(.18 + Math.abs(Math.cos(time * .47 + seed)) * .7, .08, .94));
-    high_energy.push(clamp(.14 + Math.abs(Math.sin(time * .91 + seed * 2)) * .8, .08, .97));
-    centroid.push(clamp(.2 + Math.abs(Math.sin(time * .29 + seed)) * .72, .08, .95));
-    flatness.push(clamp(.18 + Math.abs(Math.cos(time * .52)) * .6, .08, .88));
-  }
-  return { duration: safeDuration, beat_times, rms, onset, low_energy, mid_energy, high_energy, centroid, flatness };
-}
-
 async function inspectAudio(file: File, progress: (value: number) => void): Promise<FeatureSet> {
   progress(8);
   const url = URL.createObjectURL(file);
@@ -77,19 +66,105 @@ async function inspectAudio(file: File, progress: (value: number) => void): Prom
     window.setTimeout(finish, 1800);
   });
   progress(30);
-  let seed = file.size % 13;
-  try {
-    const context = new AudioContext();
-    const buffer = await context.decodeAudioData(await file.arrayBuffer());
-    seed += Math.round(buffer.sampleRate / 1000) + buffer.numberOfChannels;
-    await context.close();
-  } catch {
-    seed += file.name.length;
-  }
+  URL.revokeObjectURL(url);
   progress(72);
-  const features = makeFeatures(duration, seed);
+  const features = { duration: clamp(duration || 42, 18, 180) };
   progress(100);
   return features;
+}
+
+const blankLiveFeatures = (): LiveFeatures => ({ rms: 0, onset: 0, low: 0, mid: 0, high: 0, centroid: 0, flatness: 0, pulse: false });
+
+function createReactiveTrack(context: AudioContext, element: HTMLAudioElement): AudioReactiveTrack {
+  const source = context.createMediaElementSource(element);
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 1024;
+  analyser.smoothingTimeConstant = .58;
+  source.connect(analyser);
+  analyser.connect(context.destination);
+  return {
+    element,
+    analyser,
+    source,
+    frequencies: new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount)),
+    waveform: new Uint8Array(new ArrayBuffer(analyser.fftSize)),
+    previousSpectrum: new Float32Array(new ArrayBuffer(analyser.frequencyBinCount * Float32Array.BYTES_PER_ELEMENT)),
+    energyBaseline: .02,
+    lastTime: -1,
+    lastPulseAt: -10,
+    lastFeatures: blankLiveFeatures(),
+  };
+}
+
+function resetReactiveTrack(track: AudioReactiveTrack | null) {
+  if (!track) return;
+  track.previousSpectrum.fill(0);
+  track.energyBaseline = .02;
+  track.lastTime = -1;
+  track.lastPulseAt = -10;
+  track.lastFeatures = blankLiveFeatures();
+}
+
+function readReactiveTrack(track: AudioReactiveTrack | null): LiveFeatures {
+  if (!track) return blankLiveFeatures();
+  track.analyser.getByteFrequencyData(track.frequencies);
+  track.analyser.getByteTimeDomainData(track.waveform);
+  const sampleRate = track.analyser.context.sampleRate;
+  const binWidth = sampleRate / track.analyser.fftSize;
+  const band = (minHz: number, maxHz: number) => {
+    const first = clamp(Math.floor(minHz / binWidth), 0, track.frequencies.length - 1);
+    const last = clamp(Math.ceil(maxHz / binWidth), first + 1, track.frequencies.length);
+    let total = 0;
+    for (let index = first; index < last; index += 1) total += track.frequencies[index] / 255;
+    return total / Math.max(1, last - first);
+  };
+  let waveformEnergy = 0;
+  for (const sample of track.waveform) {
+    const centered = (sample - 128) / 128;
+    waveformEnergy += centered * centered;
+  }
+  const rms = clamp(Math.sqrt(waveformEnergy / track.waveform.length) * 2.2, 0, 1);
+  const low = clamp(band(35, 180) * 1.35, 0, 1);
+  const mid = clamp(band(180, 2200) * 1.55, 0, 1);
+  const high = clamp(band(2200, Math.min(10000, sampleRate / 2)) * 1.9, 0, 1);
+  let flux = 0;
+  let weightedFrequency = 0;
+  let totalMagnitude = 0;
+  let logMagnitude = 0;
+  let magnitudeTotal = 0;
+  for (let index = 1; index < track.frequencies.length; index += 1) {
+    const magnitude = track.frequencies[index] / 255;
+    flux += Math.max(0, magnitude - track.previousSpectrum[index]);
+    const frequency = index * binWidth;
+    weightedFrequency += frequency * magnitude;
+    totalMagnitude += magnitude;
+    if (magnitude > .001) {
+      logMagnitude += Math.log(magnitude);
+      magnitudeTotal += 1;
+    }
+    track.previousSpectrum[index] = magnitude;
+  }
+  const centroid = clamp(totalMagnitude ? weightedFrequency / totalMagnitude / (sampleRate / 2) : 0, 0, 1);
+  const flatness = clamp(magnitudeTotal ? Math.exp(logMagnitude / magnitudeTotal) / Math.max(.001, totalMagnitude / Math.max(1, track.frequencies.length - 1)) : 0, 0, 1);
+  const normalizedFlux = clamp(flux / Math.max(1, track.frequencies.length - 1) * 8, 0, 1);
+  const onset = clamp((normalizedFlux - track.energyBaseline) * 7 + normalizedFlux * .28, 0, 1);
+  track.energyBaseline = track.energyBaseline * .94 + normalizedFlux * .06;
+  const now = track.element.currentTime;
+  const pulse = track.lastTime >= 0 && onset > .38 && now - track.lastPulseAt > .2;
+  if (pulse) track.lastPulseAt = now;
+  track.lastTime = now;
+  track.lastFeatures = { rms, onset, low, mid, high, centroid, flatness, pulse };
+  return track.lastFeatures;
+}
+
+function chooseBehavior(features: LiveFeatures): Behavior {
+  if (features.onset > .78 && features.high > .42) return 'DIVE';
+  if (features.onset > .58) return 'SWARM';
+  if (features.low > .62) return 'TANK';
+  if (features.mid > .52 && features.rms > .3) return 'SHOOTER';
+  if (features.centroid > .56) return 'ZIGZAG';
+  if (features.rms > .28 && features.flatness < .38) return 'FORMATION';
+  return 'PATROL';
 }
 
 function spawnParticles(list: ParticleEntity[], x: number, y: number, color: string, count: number, speedMin = 2, speedMax = 8) {
@@ -139,7 +214,7 @@ function Home() {
   const stageAudioRef = useRef<HTMLAudioElement | null>(null);
   const bossAudioRef = useRef<HTMLAudioElement | null>(null);
   const pointerRef = useRef({ x: W / 2, y: H - 80 });
-  const gameRef = useRef({ state: 'UPLOAD' as GameState, stageFeatures: null as FeatureSet | null, bossFeatures: null as FeatureSet | null, player: { x: W / 2, y: H - 80, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [] as EnemyEntity[], bullets: [] as BulletEntity[], enemyBullets: [] as EnemyBulletEntity[], particles: [] as ParticleEntity[], boss: null as BossEntity | null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, stageDone: false, introTimer: 0, countdown: 3, countdownTimer: 0, victoryTimer: 0, currentBehavior: '' });
+  const gameRef = useRef({ state: 'UPLOAD' as GameState, stageFeatures: null as FeatureSet | null, bossFeatures: null as FeatureSet | null, audioContext: null as AudioContext | null, stageReactive: null as AudioReactiveTrack | null, bossReactive: null as AudioReactiveTrack | null, player: { x: W / 2, y: H - 80, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [] as EnemyEntity[], bullets: [] as BulletEntity[], enemyBullets: [] as EnemyBulletEntity[], particles: [] as ParticleEntity[], boss: null as BossEntity | null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, introTimer: 0, countdown: 3, countdownTimer: 0, victoryTimer: 0, currentBehavior: '' });
   const [state, setState] = useState<GameState>('UPLOAD');
   const [stageFile, setStageFile] = useState<File | null>(null);
   const [bossFile, setBossFile] = useState<File | null>(null);
@@ -158,10 +233,18 @@ function Home() {
   const resetAudio = useCallback(() => {
     stageAudioRef.current?.pause();
     bossAudioRef.current?.pause();
+    gameRef.current.stageReactive?.source.disconnect();
+    gameRef.current.bossReactive?.source.disconnect();
+    gameRef.current.stageReactive?.analyser.disconnect();
+    gameRef.current.bossReactive?.analyser.disconnect();
+    if (gameRef.current.audioContext) void gameRef.current.audioContext.close();
     if (stageAudioRef.current) URL.revokeObjectURL(stageAudioRef.current.src);
     if (bossAudioRef.current) URL.revokeObjectURL(bossAudioRef.current.src);
     stageAudioRef.current = null;
     bossAudioRef.current = null;
+    gameRef.current.audioContext = null;
+    gameRef.current.stageReactive = null;
+    gameRef.current.bossReactive = null;
   }, []);
 
   const startAnalysis = useCallback(async () => {
@@ -185,16 +268,26 @@ function Home() {
       game.stageFeatures = stageFeatures;
       game.bossFeatures = bossFeatures;
       resetAudio();
+      const AudioContextConstructor = window.AudioContext;
+      if (!AudioContextConstructor) throw new Error('Web Audio is not supported');
+      const audioContext = new AudioContextConstructor();
       stageAudioRef.current = new Audio(URL.createObjectURL(stageFile));
       bossAudioRef.current = new Audio(URL.createObjectURL(bossFile));
       stageAudioRef.current.preload = 'auto';
       bossAudioRef.current.preload = 'auto';
+      stageAudioRef.current.volume = .72;
+      bossAudioRef.current.volume = .72;
+      game.audioContext = audioContext;
+      game.stageReactive = createReactiveTrack(audioContext, stageAudioRef.current);
+      game.bossReactive = createReactiveTrack(audioContext, bossAudioRef.current);
+      await audioContext.resume();
       beginCountdown();
     } catch {
-      setAnalysisMessage('Audio scan unavailable — using adaptive fallback');
+      setAnalysisMessage('Live audio scan unavailable — using safe fallback');
       const game = gameRef.current;
-      game.stageFeatures = makeFeatures(42, 8);
-      game.bossFeatures = makeFeatures(28, 11);
+      game.stageFeatures = { duration: 42 };
+      game.bossFeatures = { duration: 28 };
+      resetAudio();
       stageAudioRef.current = new Audio(URL.createObjectURL(stageFile));
       bossAudioRef.current = new Audio(URL.createObjectURL(bossFile));
       beginCountdown();
@@ -205,7 +298,9 @@ function Home() {
     const game = gameRef.current;
     game.player = { x: W / 2, y: H - 80, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 };
     game.enemies = []; game.bullets = []; game.enemyBullets = []; game.particles = []; game.boss = null;
-    game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.stageDone = false; game.introTimer = 0;
+    game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.spawnCooldown = 0; game.stageDone = false; game.introTimer = 0;
+    resetReactiveTrack(game.stageReactive);
+    resetReactiveTrack(game.bossReactive);
     game.countdown = 3; game.countdownTimer = 58; game.currentBehavior = 'SCANNING';
     pointerRef.current = { x: W / 2, y: H - 80 };
     setCountdown(3);
@@ -235,6 +330,8 @@ function Home() {
     let last = performance.now();
     const getGameTime = () => {
       const game = gameRef.current;
+      const audio = game.state === 'BOSS' ? bossAudioRef.current : stageAudioRef.current;
+      if (audio && Number.isFinite(audio.currentTime) && audio.currentTime > 0) return audio.currentTime;
       return game.state === 'BOSS' ? (performance.now() - game.bossStart) / 1000 : (performance.now() - game.songStart) / 1000;
     };
     const rectsOverlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
@@ -246,7 +343,12 @@ function Home() {
     const beginPlaying = () => {
       const game = gameRef.current;
       syncState('PLAYING');
-      if (stageAudioRef.current) { stageAudioRef.current.currentTime = 0; void stageAudioRef.current.play().catch(() => undefined); }
+      resetReactiveTrack(game.stageReactive);
+      if (stageAudioRef.current) {
+        stageAudioRef.current.currentTime = 0;
+        void game.audioContext?.resume();
+        void stageAudioRef.current.play().catch(() => undefined);
+      }
       game.songStart = performance.now();
     };
     const beginBossIntro = () => {
@@ -257,13 +359,14 @@ function Home() {
     };
     const beginBoss = () => {
       const game = gameRef.current;
-      const features = game.bossFeatures ?? makeFeatures(28, 4);
-      const mean = features.rms.reduce((sum, value) => sum + value, 0) / Math.max(1, features.rms.length);
-      const hp = Math.max(135, Math.round(250 * (.5 + mean)));
+      const features = game.bossFeatures ?? { duration: 28 };
+      const hp = Math.max(165, Math.round(180 + Math.min(55, features.duration)));
       game.boss = { x: W / 2, y: -70, radius: 55, health: hp, maxHealth: hp, phase: 'INTRO', frame: 0, vx: 1.8, fireTimer: 0, dyingTimer: 0 };
       game.bullets = []; game.enemyBullets = []; game.beatIndex = 0;
       game.state = 'BOSS'; game.bossStart = performance.now();
-      bossAudioRef.current?.play().catch(() => undefined);
+      resetReactiveTrack(game.bossReactive);
+      void game.audioContext?.resume();
+      void bossAudioRef.current?.play().catch(() => undefined);
       syncState('BOSS');
     };
     const gameOver = () => {
@@ -318,29 +421,24 @@ function Home() {
         player.fireTimer = 15;
       }
       if (game.state === 'PLAYING') {
-        const features = game.stageFeatures ?? makeFeatures(42, 1);
+        const features = game.stageFeatures ?? { duration: 42 };
+        const live = readReactiveTrack(game.stageReactive);
         const songTime = getGameTime();
-        while (game.spawnIndex < features.beat_times.length && features.beat_times[game.spawnIndex] <= songTime) {
-          const index = game.spawnIndex;
-          const rms = features.rms[index], onset = features.onset[index], low = features.low_energy[index], mid = features.mid_energy[index], high = features.high_energy[index], centroid = features.centroid[index];
-          game.spawnIndex += 1;
-          if (rms < .13 && onset < .15) continue;
-          let behavior: Behavior = 'PATROL';
-          if (onset > .84 && high > .5) behavior = 'DIVE';
-          else if (onset > .72) behavior = 'SWARM';
-          else if (low > .7) behavior = 'TANK';
-          else if (mid > .6 && rms > .4) behavior = 'SHOOTER';
-          else if (centroid > .6) behavior = 'ZIGZAG';
-          else if (rms > .35 && features.flatness[index] < .3) behavior = 'FORMATION';
-          const count = Math.min(4, 1 + Math.floor(rms * 3) + (onset > .88 ? 2 : 0));
+        game.spawnCooldown -= delta;
+        game.currentBehavior = chooseBehavior(live);
+        if (live.pulse && game.spawnCooldown <= 0 && game.enemies.length < 20) {
+          const behavior = chooseBehavior(live);
+          const intensity = clamp(live.rms * .65 + live.onset * .35, .12, 1);
+          const count = Math.min(5, 1 + Math.floor(intensity * 3) + (live.onset > .8 ? 1 : 0));
           for (let enemyIndex = 0; enemyIndex < count && game.enemies.length < 20; enemyIndex += 1) {
-            const radius = 10 + low * 34;
+            const radius = 10 + live.low * 34;
             const x = behavior === 'FORMATION' ? (W / (count + 1)) * (enemyIndex + 1) : random(radius + 18, W - radius - 18);
-            game.enemies.push({ x, y: -radius - 12, radius, health: 1 + Math.round(low * 5), maxHealth: 1 + Math.round(low * 5), speed: 1.8 + high * 5.2, behavior, fireRate: mid > .4 ? Math.round(105 - mid * 45) : 0, fireTimer: randomInt(18, 100), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, alive: true });
+            const health = 1 + Math.round(live.low * 5);
+            game.enemies.push({ x, y: -radius - 12, radius, health, maxHealth: health, speed: 1.8 + live.high * 5.2, behavior, fireRate: live.mid > .4 ? Math.round(105 - live.mid * 45) : 0, fireTimer: randomInt(18, 100), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, alive: true });
           }
-          game.currentBehavior = behavior;
+          game.spawnCooldown = clamp(34 - intensity * 18 - live.high * 5, 10, 34);
         }
-        if (!game.stageDone && songTime >= features.duration) game.stageDone = true;
+        if (!game.stageDone && (songTime >= features.duration || Boolean(stageAudioRef.current?.ended))) game.stageDone = true;
         if (game.stageDone && game.enemies.length === 0) beginBossIntro();
         for (const enemy of game.enemies) {
           enemy.frame += delta;
@@ -370,11 +468,46 @@ function Home() {
         if (boss.phase === 'INTRO') { boss.y += (100 - boss.y) * .03 * delta; if (boss.y >= 98) boss.phase = boss.health / boss.maxHealth > .66 ? 'PHASE1' : 'PHASE2'; }
         else if (boss.phase === 'DYING') { boss.dyingTimer += delta; if (game.frame % 4 === 0) spawnParticles(game.particles, boss.x + random(-boss.radius, boss.radius), boss.y + random(-boss.radius, boss.radius), ['#ff4444', '#ff8800', '#ffff00', '#ffffff'][randomInt(0, 3)], 12, 2, 9); if (boss.dyingTimer >= 150) { boss.phase = 'DYING'; victory(); } }
         else {
+          const live = readReactiveTrack(game.bossReactive);
           const healthRatio = boss.health / boss.maxHealth;
           boss.phase = healthRatio > .66 ? 'PHASE1' : healthRatio > .33 ? 'PHASE2' : 'PHASE3';
-        if (boss.phase === 'PHASE1') { boss.x = W / 2 + Math.sin(boss.frame * .022) * (W * .36); boss.y = 105 + Math.sin(boss.frame * .013) * 30; boss.fireTimer += delta; if (boss.fireTimer >= 105) { boss.fireTimer = 0; const dx = player.x - boss.x, dy = player.y - boss.y, distance = Math.hypot(dx, dy) || 1; game.enemyBullets.push({ x: boss.x, y: boss.y, vx: dx / distance * 6.8, vy: dy / distance * 6.8, damage: 8, alive: true }); } }
-          else if (boss.phase === 'PHASE2') { boss.x += boss.vx * 2.5 * delta * .075; boss.y = 110 + Math.sin(boss.frame * .018) * 50; if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1; boss.fireTimer += delta; if (boss.fireTimer >= 78) { boss.fireTimer = 0; const base = Math.atan2(player.y - boss.y, player.x - boss.x); for (let spread = -1; spread <= 1; spread += 1) { const angle = base + spread * .23; game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 7.1, vy: Math.sin(angle) * 7.1, damage: 5, alive: true }); } } }
-          else { boss.x += (player.x - boss.x) * .016 * delta; boss.y += (Math.min(player.y - 120, 200) - boss.y) * .011 * delta; boss.fireTimer += delta; if (boss.fireTimer >= 55) { boss.fireTimer = 0; for (let ray = 0; ray < 8; ray += 1) { const angle = (ray / 8) * Math.PI * 2 + boss.frame * .06; game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 6.6, vy: Math.sin(angle) * 6.6, damage: 3, alive: true }); } } }
+          game.currentBehavior = live.pulse ? 'BOSS PULSE' : 'BOSS TRACKING';
+          boss.fireTimer -= delta;
+          if (live.pulse && live.high > .5) boss.vx *= -1;
+          if (boss.phase === 'PHASE1') {
+            boss.x += boss.vx * (1.2 + live.high * 3.6) * delta;
+            boss.y = 105 + Math.sin(boss.frame * (.012 + live.mid * .02)) * (18 + live.low * 42);
+            if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1;
+            if (boss.fireTimer <= 0 && (live.pulse || live.rms > .72)) {
+              boss.fireTimer = clamp(38 - live.onset * 14 - live.mid * 8, 13, 38);
+              const dx = player.x - boss.x, dy = player.y - boss.y, distance = Math.hypot(dx, dy) || 1;
+              game.enemyBullets.push({ x: boss.x, y: boss.y, vx: dx / distance * 6.8, vy: dy / distance * 6.8, damage: 8, alive: true });
+            }
+          } else if (boss.phase === 'PHASE2') {
+            boss.x += boss.vx * (2 + live.high * 5) * delta;
+            boss.y = 110 + Math.sin(boss.frame * (.015 + live.mid * .025)) * (25 + live.low * 55);
+            if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1;
+            if (boss.fireTimer <= 0 && (live.pulse || live.rms > .68)) {
+              boss.fireTimer = clamp(31 - live.onset * 12 - live.mid * 7, 11, 31);
+              const base = Math.atan2(player.y - boss.y, player.x - boss.x);
+              const spreadCount = live.high > .72 ? 5 : 3;
+              for (let spread = 0; spread < spreadCount; spread += 1) {
+                const angle = base + (spread - (spreadCount - 1) / 2) * (.16 + live.high * .08);
+                game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 7.1, vy: Math.sin(angle) * 7.1, damage: 5, alive: true });
+              }
+            }
+          } else {
+            boss.x += (player.x - boss.x) * (.012 + live.mid * .012) * delta;
+            boss.y += (Math.min(player.y - 120, 200) - boss.y) * (.008 + live.low * .012) * delta;
+            if (boss.fireTimer <= 0 && (live.pulse || live.rms > .62)) {
+              boss.fireTimer = clamp(25 - live.onset * 10 - live.low * 7, 9, 25);
+              const rayCount = 8 + Math.round(live.high * 4);
+              for (let ray = 0; ray < rayCount; ray += 1) {
+                const angle = (ray / rayCount) * Math.PI * 2 + boss.frame * (.025 + live.high * .05);
+                game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * (6.2 + live.low * 1.2), vy: Math.sin(angle) * (6.2 + live.low * 1.2), damage: 3, alive: true });
+              }
+            }
+          }
         }
       }
       for (const bullet of game.bullets) { bullet.y += bullet.vy * delta * BULLET_TIME_SCALE; if (bullet.y < -20) bullet.alive = false; }

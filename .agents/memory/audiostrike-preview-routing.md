@@ -14,3 +14,9 @@ The user specifically approved the boss-fight feel as a good baseline; preserve 
 **Why:** The boss fight was explicitly described as great before the projectile update.
 
 **How to apply:** Prefer targeted combat-balance changes over redesigning the boss phases or encounter flow unless the user asks for that.
+
+AudioStrike uses browser-native Web Audio analysis during playback rather than uploading tracks or relying on precomputed beat timelines.
+
+**Why:** Local file playback stays private, and live spectral response is available on the same managed browser route used by desktop and touchscreen previews.
+
+**How to apply:** Keep stage and boss behavior driven from their active `AnalyserNode` streams; preserve the local-file flow unless server-side analysis is explicitly requested.
