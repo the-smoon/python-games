@@ -31,7 +31,7 @@ type AudioReactiveTrack = {
 type EnemyEntity = {
   x: number; y: number; radius: number; health: number; maxHealth: number; speed: number;
   behavior: Behavior; fireRate: number; fireTimer: number; frame: number; zigDir: number;
-  formX: number; formY: number; diving: boolean; dvx: number; dvy: number; alive: boolean;
+  formX: number; formY: number; diving: boolean; dvx: number; dvy: number; exiting: boolean; alive: boolean;
 };
 type BulletEntity = { x: number; y: number; vy: number; alive: boolean };
 type EnemyBulletEntity = { x: number; y: number; vx: number; vy: number; damage: number; alive: boolean };
@@ -43,8 +43,9 @@ const H = 600;
 const PLAYER_MAX_HEALTH = 100;
 const PLAYER_BULLET_SPEED = 25;
 const BULLET_TIME_SCALE = 0.14;
-const ENEMY_MOTION_TIME_SCALE = 0.085;
-const ENEMY_BULLET_TIME_SCALE = 0.14;
+const ENEMY_MOTION_TIME_SCALE = 0.12;
+const ENEMY_BULLET_TIME_SCALE = 0.19;
+const STAGE_EXIT_BUFFER_SECONDS = 4;
 const PLAYER_W = 20;
 const PLAYER_H = 32;
 const COLORS: Record<string, string> = {
@@ -353,8 +354,14 @@ function Home() {
     };
     const beginBossIntro = () => {
       const game = gameRef.current;
-      game.state = 'BOSS_INTRO'; game.introTimer = 165; game.enemies = []; game.enemyBullets = [];
+      game.state = 'BOSS_INTRO'; game.introTimer = 180; game.enemies = []; game.enemyBullets = [];
       stageAudioRef.current?.pause();
+      if (bossAudioRef.current) {
+        bossAudioRef.current.currentTime = 0;
+        bossAudioRef.current.volume = 0;
+        void game.audioContext?.resume();
+        void bossAudioRef.current.play().catch(() => undefined);
+      }
       syncState('BOSS_INTRO');
     };
     const beginBoss = () => {
@@ -365,8 +372,8 @@ function Home() {
       game.bullets = []; game.enemyBullets = []; game.beatIndex = 0;
       game.state = 'BOSS'; game.bossStart = performance.now();
       resetReactiveTrack(game.bossReactive);
+      if (bossAudioRef.current) bossAudioRef.current.volume = .72;
       void game.audioContext?.resume();
-      void bossAudioRef.current?.play().catch(() => undefined);
       syncState('BOSS');
     };
     const gameOver = () => {
@@ -393,6 +400,9 @@ function Home() {
       }
       if (game.state === 'BOSS_INTRO') {
         game.introTimer -= delta;
+        const introProgress = clamp(1 - game.introTimer / 180, 0, 1);
+        if (stageAudioRef.current) stageAudioRef.current.volume = .72 * clamp(1 - introProgress * 1.35, 0, 1);
+        if (bossAudioRef.current) bossAudioRef.current.volume = .72 * clamp((introProgress - .12) / .72, 0, 1);
         for (const particle of game.particles) { particle.x += particle.vx * delta * .06; particle.y += particle.vy * delta * .06; particle.vy += .02 * delta; particle.life -= delta; }
         game.particles = game.particles.filter((particle) => particle.life > 0);
         if (game.introTimer <= 0) beginBoss();
@@ -424,9 +434,10 @@ function Home() {
         const features = game.stageFeatures ?? { duration: 42 };
         const live = readReactiveTrack(game.stageReactive);
         const songTime = getGameTime();
+        const stageEnding = songTime >= Math.max(0, features.duration - STAGE_EXIT_BUFFER_SECONDS);
         game.spawnCooldown -= delta;
-        game.currentBehavior = chooseBehavior(live);
-        if (live.pulse && game.spawnCooldown <= 0 && game.enemies.length < 20) {
+        game.currentBehavior = stageEnding ? 'EXITING' : chooseBehavior(live);
+        if (!stageEnding && live.pulse && game.spawnCooldown <= 0 && game.enemies.length < 20) {
           const behavior = chooseBehavior(live);
           const intensity = clamp(live.rms * .65 + live.onset * .35, .12, 1);
           const count = Math.min(5, 1 + Math.floor(intensity * 3) + (live.onset > .8 ? 1 : 0));
@@ -434,32 +445,34 @@ function Home() {
             const radius = 10 + live.low * 34;
             const x = behavior === 'FORMATION' ? (W / (count + 1)) * (enemyIndex + 1) : random(radius + 18, W - radius - 18);
             const health = 1 + Math.round(live.low * 5);
-            game.enemies.push({ x, y: -radius - 12, radius, health, maxHealth: health, speed: 1.8 + live.high * 5.2, behavior, fireRate: live.mid > .4 ? Math.round(105 - live.mid * 45) : 0, fireTimer: randomInt(18, 100), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, alive: true });
+            game.enemies.push({ x, y: -radius - 12, radius, health, maxHealth: health, speed: 2.4 + live.high * 6.2, behavior, fireRate: live.mid > .4 ? Math.round(150 - live.mid * 55) : 0, fireTimer: randomInt(24, 120), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, exiting: false, alive: true });
           }
-          game.spawnCooldown = clamp(34 - intensity * 18 - live.high * 5, 10, 34);
+          game.spawnCooldown = clamp(58 - intensity * 22 - live.high * 5, 28, 58);
         }
         if (!game.stageDone && (songTime >= features.duration || Boolean(stageAudioRef.current?.ended))) game.stageDone = true;
         if (game.stageDone && game.enemies.length === 0) beginBossIntro();
         for (const enemy of game.enemies) {
           enemy.frame += delta;
-          if (enemy.behavior === 'PATROL') { enemy.y += enemy.speed * delta * ENEMY_MOTION_TIME_SCALE; enemy.x += Math.sin(enemy.frame * .03) * .6; }
+           if (stageEnding) enemy.exiting = true;
+           if (enemy.exiting) { enemy.fireRate = 0; enemy.y += (12 + enemy.speed * 2.2) * delta; }
+           else if (enemy.behavior === 'PATROL') { enemy.y += enemy.speed * delta * ENEMY_MOTION_TIME_SCALE; enemy.x += Math.sin(enemy.frame * .03) * .6; }
           else if (enemy.behavior === 'ZIGZAG') { enemy.y += enemy.speed * .65 * delta * ENEMY_MOTION_TIME_SCALE; enemy.x += enemy.zigDir * enemy.speed * 1.6 * delta * ENEMY_MOTION_TIME_SCALE; if (enemy.x < enemy.radius || enemy.x > W - enemy.radius) enemy.zigDir *= -1; }
           else if (enemy.behavior === 'FORMATION') { enemy.formY += enemy.speed * .4 * delta * ENEMY_MOTION_TIME_SCALE; enemy.y += (enemy.formY - enemy.y) * .08; enemy.x += (enemy.formX + Math.sin(enemy.frame * .022) * 15 - enemy.x) * .08; }
           else if (enemy.behavior === 'SWARM') { const dx = player.x - enemy.x; const dy = player.y - enemy.y; const distance = Math.hypot(dx, dy) || 1; enemy.x += (dx / distance) * enemy.speed * .4 * delta * ENEMY_MOTION_TIME_SCALE + random(-1.5, 1.5); enemy.y += enemy.speed * .6 * delta * ENEMY_MOTION_TIME_SCALE + (dy / distance) * enemy.speed * .2 * delta * ENEMY_MOTION_TIME_SCALE; }
           else if (enemy.behavior === 'DIVE') { if (!enemy.diving) { enemy.y += enemy.speed * .5 * delta * ENEMY_MOTION_TIME_SCALE; if (enemy.y > 100 && Math.random() < .022 * delta) { enemy.diving = true; const dx = player.x - enemy.x; const dy = player.y - enemy.y; const distance = Math.hypot(dx, dy) || 1; enemy.dvx = dx / distance * enemy.speed * 3.2; enemy.dvy = dy / distance * enemy.speed * 3.2; } } else { enemy.x += enemy.dvx * delta * ENEMY_MOTION_TIME_SCALE; enemy.y += enemy.dvy * delta * ENEMY_MOTION_TIME_SCALE; } }
           else if (enemy.behavior === 'SHOOTER') { enemy.y += enemy.speed * .25 * delta * ENEMY_MOTION_TIME_SCALE; if (enemy.y > 80) enemy.y += (80 + (enemy.x / W) * 60 - enemy.y) * .03; enemy.x += Math.sin(enemy.frame * .026) * enemy.speed * .5; }
           else { enemy.y += enemy.speed * .32 * delta * ENEMY_MOTION_TIME_SCALE; enemy.x += Math.sin(enemy.frame * .014) * enemy.speed * .3; }
-          if (enemy.fireRate > 0 && enemy.behavior !== 'SWARM' && !enemy.diving) {
+           if (!enemy.exiting && enemy.fireRate > 0 && enemy.behavior !== 'SWARM' && !enemy.diving) {
             enemy.fireTimer -= delta;
             if (enemy.fireTimer <= 0) {
               enemy.fireTimer = enemy.fireRate;
               const dx = player.x - enemy.x, dy = player.y - enemy.y, distance = Math.hypot(dx, dy) || 1;
-              if (enemy.behavior === 'SHOOTER') { const angle = Math.atan2(dy, dx); game.enemyBullets.push({ x: enemy.x, y: enemy.y, vx: Math.cos(angle) * 5.8, vy: Math.sin(angle) * 5.8, damage: 4, alive: true }); }
-              else game.enemyBullets.push({ x: enemy.x, y: enemy.y, vx: dx / distance * 5.8, vy: dy / distance * 5.8, damage: enemy.behavior === 'TANK' ? 9 : 6, alive: true });
+               if (enemy.behavior === 'SHOOTER') { const angle = Math.atan2(dy, dx); game.enemyBullets.push({ x: enemy.x, y: enemy.y, vx: Math.cos(angle) * 7.4, vy: Math.sin(angle) * 7.4, damage: 4, alive: true }); }
+               else game.enemyBullets.push({ x: enemy.x, y: enemy.y, vx: dx / distance * 7.4, vy: dy / distance * 7.4, damage: enemy.behavior === 'TANK' ? 9 : 6, alive: true });
             }
           }
           if (enemy.y > H + 70 || enemy.x < -90 || enemy.x > W + 90) enemy.alive = false;
-          if (enemyHitsPlayer(enemy, player)) { enemy.alive = false; const impactDamage = enemy.behavior === 'TANK' ? 25 : enemy.behavior === 'DIVE' ? 20 : enemy.behavior === 'SWARM' ? 10 : 14; if (player.invincible <= 0) { player.health = Math.max(0, player.health - impactDamage); player.invincible = 90; spawnParticles(game.particles, player.x, player.y, '#ff3333', 14); if (player.health <= 0) gameOver(); } }
+           if (!enemy.exiting && enemyHitsPlayer(enemy, player)) { enemy.alive = false; const impactDamage = enemy.behavior === 'TANK' ? 25 : enemy.behavior === 'DIVE' ? 20 : enemy.behavior === 'SWARM' ? 10 : 14; if (player.invincible <= 0) { player.health = Math.max(0, player.health - impactDamage); player.invincible = 90; spawnParticles(game.particles, player.x, player.y, '#ff3333', 14); if (player.health <= 0) gameOver(); } }
         }
         game.enemies = game.enemies.filter((enemy) => enemy.alive);
       } else if (game.boss) {
@@ -479,32 +492,32 @@ function Home() {
             boss.y = 105 + Math.sin(boss.frame * (.012 + live.mid * .02)) * (18 + live.low * 42);
             if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1;
             if (boss.fireTimer <= 0 && (live.pulse || live.rms > .72)) {
-              boss.fireTimer = clamp(38 - live.onset * 14 - live.mid * 8, 13, 38);
+              boss.fireTimer = clamp(54 - live.onset * 16 - live.mid * 8, 24, 54);
               const dx = player.x - boss.x, dy = player.y - boss.y, distance = Math.hypot(dx, dy) || 1;
-              game.enemyBullets.push({ x: boss.x, y: boss.y, vx: dx / distance * 6.8, vy: dy / distance * 6.8, damage: 8, alive: true });
+              game.enemyBullets.push({ x: boss.x, y: boss.y, vx: dx / distance * 8, vy: dy / distance * 8, damage: 8, alive: true });
             }
           } else if (boss.phase === 'PHASE2') {
             boss.x += boss.vx * (2 + live.high * 5) * delta;
             boss.y = 110 + Math.sin(boss.frame * (.015 + live.mid * .025)) * (25 + live.low * 55);
             if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1;
             if (boss.fireTimer <= 0 && (live.pulse || live.rms > .68)) {
-              boss.fireTimer = clamp(31 - live.onset * 12 - live.mid * 7, 11, 31);
+              boss.fireTimer = clamp(45 - live.onset * 13 - live.mid * 7, 20, 45);
               const base = Math.atan2(player.y - boss.y, player.x - boss.x);
               const spreadCount = live.high > .72 ? 5 : 3;
               for (let spread = 0; spread < spreadCount; spread += 1) {
                 const angle = base + (spread - (spreadCount - 1) / 2) * (.16 + live.high * .08);
-                game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 7.1, vy: Math.sin(angle) * 7.1, damage: 5, alive: true });
+                game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 8.4, vy: Math.sin(angle) * 8.4, damage: 5, alive: true });
               }
             }
           } else {
             boss.x += (player.x - boss.x) * (.012 + live.mid * .012) * delta;
             boss.y += (Math.min(player.y - 120, 200) - boss.y) * (.008 + live.low * .012) * delta;
             if (boss.fireTimer <= 0 && (live.pulse || live.rms > .62)) {
-              boss.fireTimer = clamp(25 - live.onset * 10 - live.low * 7, 9, 25);
+              boss.fireTimer = clamp(36 - live.onset * 10 - live.low * 7, 16, 36);
               const rayCount = 8 + Math.round(live.high * 4);
               for (let ray = 0; ray < rayCount; ray += 1) {
                 const angle = (ray / rayCount) * Math.PI * 2 + boss.frame * (.025 + live.high * .05);
-                game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * (6.2 + live.low * 1.2), vy: Math.sin(angle) * (6.2 + live.low * 1.2), damage: 3, alive: true });
+                game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * (7.4 + live.low * 1.2), vy: Math.sin(angle) * (7.4 + live.low * 1.2), damage: 3, alive: true });
               }
             }
           }
