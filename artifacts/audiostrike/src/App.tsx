@@ -46,6 +46,7 @@ const BULLET_TIME_SCALE = 0.14;
 const ENEMY_MOTION_TIME_SCALE = 0.12;
 const ENEMY_BULLET_TIME_SCALE = 0.19;
 const STAGE_EXIT_BUFFER_SECONDS = 4;
+const TOUCH_SHIP_OFFSET = 62;
 const PLAYER_W = 20;
 const PLAYER_H = 32;
 const COLORS: Record<string, string> = {
@@ -589,7 +590,10 @@ function Home() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    pointerRef.current = { x: (event.clientX - rect.left) * W / rect.width, y: (event.clientY - rect.top) * H / rect.height };
+    const x = (event.clientX - rect.left) * W / rect.width;
+    const touchY = (event.clientY - rect.top) * H / rect.height;
+    const y = event.pointerType === 'touch' || event.pointerType === 'pen' ? touchY - TOUCH_SHIP_OFFSET : touchY;
+    pointerRef.current = { x, y };
   };
 
   const fileLabel = (file: File | null) => file ? `${file.name} · ${(file.size / 1048576).toFixed(1)} MB` : 'No track selected';
