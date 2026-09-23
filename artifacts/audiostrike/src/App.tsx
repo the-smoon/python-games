@@ -41,12 +41,13 @@ type BossEntity = { x: number; y: number; radius: number; health: number; maxHea
 const W = 800;
 const H = 600;
 const PLAYER_MAX_HEALTH = 100;
-const PLAYER_BULLET_SPEED = 25;
-const BULLET_TIME_SCALE = 0.14;
+const PLAYER_BULLET_SPEED = 48;
+const PLAYER_FIRE_INTERVAL = 8;
+const BULLET_TIME_SCALE = 0.22;
 const ENEMY_MOTION_TIME_SCALE = 0.12;
 const ENEMY_BULLET_TIME_SCALE = 0.19;
 const STAGE_EXIT_BUFFER_SECONDS = 4;
-const TOUCH_SHIP_OFFSET = 62;
+const TOUCH_SHIP_SCREEN_OFFSET = 72;
 const PLAYER_W = 20;
 const PLAYER_H = 32;
 const COLORS: Record<string, string> = {
@@ -215,7 +216,7 @@ function Home() {
   const bossInputRef = useRef<HTMLInputElement>(null);
   const stageAudioRef = useRef<HTMLAudioElement | null>(null);
   const bossAudioRef = useRef<HTMLAudioElement | null>(null);
-  const pointerRef = useRef({ x: W / 2, y: H - 80 });
+  const pointerRef = useRef({ x: W / 2, y: H - 80, isTouch: false });
   const gameRef = useRef({ state: 'UPLOAD' as GameState, stageFeatures: null as FeatureSet | null, bossFeatures: null as FeatureSet | null, audioContext: null as AudioContext | null, stageReactive: null as AudioReactiveTrack | null, bossReactive: null as AudioReactiveTrack | null, player: { x: W / 2, y: H - 80, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [] as EnemyEntity[], bullets: [] as BulletEntity[], enemyBullets: [] as EnemyBulletEntity[], particles: [] as ParticleEntity[], boss: null as BossEntity | null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, introTimer: 0, countdown: 3, countdownTimer: 0, victoryTimer: 0, currentBehavior: '' });
   const [state, setState] = useState<GameState>('UPLOAD');
   const [stageFile, setStageFile] = useState<File | null>(null);
@@ -304,7 +305,7 @@ function Home() {
     resetReactiveTrack(game.stageReactive);
     resetReactiveTrack(game.bossReactive);
     game.countdown = 3; game.countdownTimer = 58; game.currentBehavior = 'SCANNING';
-    pointerRef.current = { x: W / 2, y: H - 80 };
+    pointerRef.current = { x: W / 2, y: H - 80, isTouch: false };
     setCountdown(3);
     setHud({ score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1 });
     syncState('COUNTDOWN');
@@ -418,8 +419,9 @@ function Home() {
       }
       if (game.state !== 'PLAYING' && game.state !== 'BOSS') return;
       const player = game.player;
-      player.x += (clamp(pointerRef.current.x, 14, W - 14) - player.x) * .28;
-      player.y += (clamp(pointerRef.current.y, 28, H - 28) - player.y) * .28;
+      const pointerSmoothing = pointerRef.current.isTouch ? .42 : .28;
+      player.x += (clamp(pointerRef.current.x, 14, W - 14) - player.x) * pointerSmoothing;
+      player.y += (clamp(pointerRef.current.y, 28, H - 28) - player.y) * pointerSmoothing;
       player.frame += 1;
       player.invincible = Math.max(0, player.invincible - delta);
       player.fireTimer -= delta;
@@ -429,7 +431,7 @@ function Home() {
           { x: player.x - 10, y: gunY, vy: -PLAYER_BULLET_SPEED, alive: true },
           { x: player.x + 10, y: gunY, vy: -PLAYER_BULLET_SPEED, alive: true },
         );
-        player.fireTimer = 15;
+        player.fireTimer = PLAYER_FIRE_INTERVAL;
       }
       if (game.state === 'PLAYING') {
         const features = game.stageFeatures ?? { duration: 42 };
@@ -592,8 +594,10 @@ function Home() {
     const rect = canvas.getBoundingClientRect();
     const x = (event.clientX - rect.left) * W / rect.width;
     const touchY = (event.clientY - rect.top) * H / rect.height;
-    const y = event.pointerType === 'touch' || event.pointerType === 'pen' ? touchY - TOUCH_SHIP_OFFSET : touchY;
-    pointerRef.current = { x, y };
+    const isTouch = event.pointerType === 'touch' || event.pointerType === 'pen';
+    const touchOffset = TOUCH_SHIP_SCREEN_OFFSET * H / rect.height;
+    const y = isTouch ? touchY - touchOffset : touchY;
+    pointerRef.current = { x, y, isTouch };
   };
 
   const fileLabel = (file: File | null) => file ? `${file.name} · ${(file.size / 1048576).toFixed(1)} MB` : 'No track selected';
