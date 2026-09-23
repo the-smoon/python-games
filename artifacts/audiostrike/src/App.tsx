@@ -41,13 +41,13 @@ type BossEntity = { x: number; y: number; radius: number; health: number; maxHea
 const W = 800;
 const H = 600;
 const PLAYER_MAX_HEALTH = 100;
-const PLAYER_BULLET_SPEED = 48;
-const PLAYER_FIRE_INTERVAL = 8;
+const PLAYER_BULLET_SPEED = 96;
+const PLAYER_FIRE_INTERVAL = 2;
 const BULLET_TIME_SCALE = 0.22;
 const ENEMY_MOTION_TIME_SCALE = 0.12;
 const ENEMY_BULLET_TIME_SCALE = 0.19;
 const STAGE_EXIT_BUFFER_SECONDS = 4;
-const TOUCH_SHIP_SCREEN_OFFSET = 72;
+const TOUCH_SHIP_SCREEN_OFFSET = 120;
 const PLAYER_W = 20;
 const PLAYER_H = 32;
 const COLORS: Record<string, string> = {
@@ -419,7 +419,7 @@ function Home() {
       }
       if (game.state !== 'PLAYING' && game.state !== 'BOSS') return;
       const player = game.player;
-      const pointerSmoothing = pointerRef.current.isTouch ? .42 : .28;
+      const pointerSmoothing = pointerRef.current.isTouch ? .72 : .28;
       player.x += (clamp(pointerRef.current.x, 14, W - 14) - player.x) * pointerSmoothing;
       player.y += (clamp(pointerRef.current.y, 28, H - 28) - player.y) * pointerSmoothing;
       player.frame += 1;
@@ -428,8 +428,10 @@ function Home() {
       if (player.fireTimer <= 0) {
         const gunY = player.y - 18;
         game.bullets.push(
-          { x: player.x - 10, y: gunY, vy: -PLAYER_BULLET_SPEED, alive: true },
-          { x: player.x + 10, y: gunY, vy: -PLAYER_BULLET_SPEED, alive: true },
+          { x: player.x - 13, y: gunY, vy: -PLAYER_BULLET_SPEED, alive: true },
+          { x: player.x - 7, y: gunY, vy: -PLAYER_BULLET_SPEED, alive: true },
+          { x: player.x + 7, y: gunY, vy: -PLAYER_BULLET_SPEED, alive: true },
+          { x: player.x + 13, y: gunY, vy: -PLAYER_BULLET_SPEED, alive: true },
         );
         player.fireTimer = PLAYER_FIRE_INTERVAL;
       }
@@ -594,7 +596,7 @@ function Home() {
     const rect = canvas.getBoundingClientRect();
     const x = (event.clientX - rect.left) * W / rect.width;
     const touchY = (event.clientY - rect.top) * H / rect.height;
-    const isTouch = event.pointerType === 'touch' || event.pointerType === 'pen';
+    const isTouch = event.pointerType === 'touch' || event.pointerType === 'pen' || (event.pointerType === 'mouse' && navigator.maxTouchPoints > 0);
     const touchOffset = TOUCH_SHIP_SCREEN_OFFSET * H / rect.height;
     const y = isTouch ? touchY - touchOffset : touchY;
     pointerRef.current = { x, y, isTouch };
