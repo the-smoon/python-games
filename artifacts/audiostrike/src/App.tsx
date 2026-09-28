@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Crosshair, FileAudio, Gamepad2, Headphones, RotateCcw, Shield, Volume2, Zap } from 'lucide-react';
 
-type GameState = 'UPLOAD' | 'ANALYZING' | 'COUNTDOWN' | 'PLAYING' | 'BOSS_INTRO' | 'BOSS' | 'GAME_OVER' | 'VICTORY';
+type GameState = 'UPLOAD' | 'ANALYZING' | 'COUNTDOWN' | 'PLAYING' | 'STAGE_EXIT' | 'BOSS_INTRO' | 'BOSS' | 'GAME_OVER' | 'VICTORY';
 type Behavior = 'PATROL' | 'ZIGZAG' | 'FORMATION' | 'SWARM' | 'DIVE' | 'SHOOTER' | 'TANK';
 type FeatureSet = {
   duration: number;
@@ -48,7 +48,7 @@ const PLAYER_FIRE_INTERVAL = 2;
 const BULLET_TIME_SCALE = 0.22;
 const ENEMY_MOTION_TIME_SCALE = 0.12;
 const ENEMY_BULLET_TIME_SCALE = 0.19;
-const STAGE_EXIT_BUFFER_SECONDS = 4;
+const STAGE_LEVEL_SECONDS = 60;
 const TOUCH_SHIP_SCREEN_OFFSET = 120;
 const SPAWN_COOLDOWN_MULTIPLIER = 2;
 const PLAYER_W = 20;
@@ -304,7 +304,7 @@ function Home() {
   const stageAudioRef = useRef<HTMLAudioElement | null>(null);
   const bossAudioRef = useRef<HTMLAudioElement | null>(null);
   const pointerRef = useRef({ x: W / 2, y: H - 80, isTouch: false });
-  const gameRef = useRef({ state: 'UPLOAD' as GameState, stageFeatures: null as FeatureSet | null, bossFeatures: null as FeatureSet | null, audioContext: null as AudioContext | null, stageReactive: null as AudioReactiveTrack | null, bossReactive: null as AudioReactiveTrack | null, player: { x: W / 2, y: H - 80, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [] as EnemyEntity[], bullets: [] as BulletEntity[], enemyBullets: [] as EnemyBulletEntity[], particles: [] as ParticleEntity[], boss: null as BossEntity | null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, introTimer: 0, countdown: 3, countdownTimer: 0, victoryTimer: 0, currentBehavior: '' });
+  const gameRef = useRef({ state: 'UPLOAD' as GameState, stageFeatures: null as FeatureSet | null, bossFeatures: null as FeatureSet | null, audioContext: null as AudioContext | null, stageReactive: null as AudioReactiveTrack | null, bossReactive: null as AudioReactiveTrack | null, player: { x: W / 2, y: H - 80, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [] as EnemyEntity[], bullets: [] as BulletEntity[], enemyBullets: [] as EnemyBulletEntity[], particles: [] as ParticleEntity[], boss: null as BossEntity | null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, stageExitTimer: 0, introTimer: 0, countdown: 3, countdownTimer: 0, victoryTimer: 0, currentBehavior: '' });
   const [state, setState] = useState<GameState>('UPLOAD');
   const [stageFile, setStageFile] = useState<File | null>(null);
   const [bossFile, setBossFile] = useState<File | null>(null);
@@ -388,7 +388,7 @@ function Home() {
     const game = gameRef.current;
     game.player = { x: W / 2, y: H - 80, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 };
     game.enemies = []; game.bullets = []; game.enemyBullets = []; game.particles = []; game.boss = null;
-    game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.spawnCooldown = 0; game.stageDone = false; game.introTimer = 0;
+      game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.spawnCooldown = 0; game.stageDone = false; game.stageExitTimer = 0; game.introTimer = 0;
     resetReactiveTrack(game.stageReactive);
     resetReactiveTrack(game.bossReactive);
     game.countdown = 3; game.countdownTimer = 58; game.currentBehavior = 'SCANNING';
@@ -415,13 +415,13 @@ function Home() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     canvas.width = W; canvas.height = H;
-    const stars = Array.from({ length: 145 }, (_, index) => ({ x: random(0, W), y: random(0, H), size: randomInt(1, 3), brightness: random(.25, .9), speed: .35 + (index % 4) * .18 }));
+      const stars = Array.from({ length: 180 }, (_, index) => ({ x: random(0, W), y: random(0, H), size: 1, brightness: random(.28, .9), speed: .55 + (index % 4) * .22 }));
     let raf = 0;
     let last = performance.now();
     const getGameTime = () => {
       const game = gameRef.current;
       const audio = game.state === 'BOSS' ? bossAudioRef.current : stageAudioRef.current;
-      if (audio && Number.isFinite(audio.currentTime) && audio.currentTime > 0) return audio.currentTime;
+      if (game.state === 'BOSS' && audio && Number.isFinite(audio.currentTime) && audio.currentTime > 0) return audio.currentTime;
       return game.state === 'BOSS' ? (performance.now() - game.bossStart) / 1000 : (performance.now() - game.songStart) / 1000;
     };
     const rectsOverlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
@@ -457,6 +457,9 @@ function Home() {
       const game = gameRef.current;
       const features = game.bossFeatures ?? { duration: 28 };
       const hp = Math.max(165, Math.round(180 + Math.min(55, features.duration)));
+      game.player.x = W / 2;
+      game.player.y = H - 80;
+      game.player.invincible = 0;
       game.boss = { x: W / 2, y: -70, radius: 55, health: hp, maxHealth: hp, shape: 'RING', projectile: 'ORB', phase: 'INTRO', frame: 0, vx: 1.8, fireTimer: 0, dyingTimer: 0 };
       game.bullets = []; game.enemyBullets = []; game.beatIndex = 0;
       game.state = 'BOSS'; game.bossStart = performance.now();
@@ -477,7 +480,10 @@ function Home() {
     const update = (delta: number) => {
       const game = gameRef.current;
       game.frame += 1;
-      for (const star of stars) { star.y += star.speed * delta * .06; if (star.y > H) { star.y = 0; star.x = random(0, W); } }
+      const backgroundScrolling = game.state === 'COUNTDOWN' || game.state === 'PLAYING' || game.state === 'BOSS' || game.state === 'VICTORY';
+      if (backgroundScrolling) {
+        for (const star of stars) { star.y += star.speed * delta * .35; if (star.y > H) { star.y = 0; star.x = random(0, W); } }
+      }
       if (game.state === 'COUNTDOWN') {
         game.countdownTimer -= delta;
         if (game.countdownTimer <= 0) {
@@ -485,6 +491,14 @@ function Home() {
           if (game.countdown <= 0) beginPlaying();
           else { game.countdownTimer = 58; setCountdown(game.countdown); }
         }
+        return;
+      }
+      if (game.state === 'STAGE_EXIT') {
+        game.stageExitTimer += delta;
+        game.player.y += 8 * delta;
+        for (const enemy of game.enemies) enemy.y += (12 + enemy.speed * 2.2) * delta;
+        game.enemies = game.enemies.filter((enemy) => enemy.y < H + enemy.radius + 24);
+        if (game.stageExitTimer >= 42 && game.player.y > H + 24) beginBossIntro();
         return;
       }
       if (game.state === 'BOSS_INTRO') {
@@ -523,13 +537,11 @@ function Home() {
         player.fireTimer = PLAYER_FIRE_INTERVAL;
       }
       if (game.state === 'PLAYING') {
-        const features = game.stageFeatures ?? { duration: 42 };
         const live = readReactiveTrack(game.stageReactive);
         const songTime = getGameTime();
-        const stageEnding = songTime >= Math.max(0, features.duration - STAGE_EXIT_BUFFER_SECONDS);
         game.spawnCooldown -= delta;
-        game.currentBehavior = stageEnding ? 'EXITING' : chooseBehavior(live);
-        if (!stageEnding && live.pulse && game.spawnCooldown <= 0 && game.enemies.length < 20) {
+        game.currentBehavior = chooseBehavior(live);
+        if (live.pulse && game.spawnCooldown <= 0 && game.enemies.length < 20) {
           const behavior = chooseBehavior(live);
           const intensity = clamp(live.rms * .65 + live.onset * .35, .12, 1);
           const count = Math.min(5, 1 + Math.floor(intensity * 3) + (live.onset > .8 ? 1 : 0));
@@ -546,11 +558,18 @@ function Home() {
           }
           game.spawnCooldown = clamp((58 - intensity * 22 - live.high * 5) * SPAWN_COOLDOWN_MULTIPLIER, 56, 116);
         }
-        if (!game.stageDone && (songTime >= features.duration || Boolean(stageAudioRef.current?.ended))) game.stageDone = true;
-        if (game.stageDone && game.enemies.length === 0) beginBossIntro();
+        if (!game.stageDone && songTime >= STAGE_LEVEL_SECONDS) {
+          game.stageDone = true;
+          game.stageExitTimer = 0;
+          for (const enemy of game.enemies) enemy.exiting = true;
+          game.enemyBullets = [];
+          stageAudioRef.current?.pause();
+          game.state = 'STAGE_EXIT';
+          syncState('STAGE_EXIT');
+          return;
+        }
         for (const enemy of game.enemies) {
           enemy.frame += delta;
-           if (stageEnding) enemy.exiting = true;
            if (enemy.exiting) { enemy.fireRate = 0; enemy.y += (12 + enemy.speed * 2.2) * delta; }
            else if (enemy.behavior === 'PATROL') { enemy.y += enemy.speed * delta * ENEMY_MOTION_TIME_SCALE; enemy.x += Math.sin(enemy.frame * .03) * .6; }
           else if (enemy.behavior === 'ZIGZAG') { enemy.y += enemy.speed * .65 * delta * ENEMY_MOTION_TIME_SCALE; enemy.x += enemy.zigDir * enemy.speed * 1.6 * delta * ENEMY_MOTION_TIME_SCALE; if (enemy.x < enemy.radius || enemy.x > W - enemy.radius) enemy.zigDir *= -1; }
@@ -691,7 +710,7 @@ function Home() {
          for (let ring = 1; ring <= 2; ring += 1) { ctx.strokeStyle = color; ctx.globalAlpha = .32 / ring; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius + ring * 14, 0, Math.PI * 2); ctx.stroke(); }
          ctx.globalAlpha = 1;
        }
-      const showPlayer = game.state === 'PLAYING' || game.state === 'BOSS' || game.state === 'COUNTDOWN';
+      const showPlayer = game.state === 'PLAYING' || game.state === 'STAGE_EXIT' || game.state === 'BOSS' || game.state === 'COUNTDOWN';
       drawPlayer(ctx, game.player.x, game.player.y, game.player.frame, !(game.player.invincible > 0 && Math.floor(game.player.invincible / 5) % 2 === 1) && showPlayer);
     };
     const loop = (now: number) => {
@@ -721,7 +740,7 @@ function Home() {
 
   const fileLabel = (file: File | null) => file ? `${file.name} · ${(file.size / 1048576).toFixed(1)} MB` : 'No track selected';
   const canStart = Boolean(stageFile && bossFile);
-  const isGame = state === 'COUNTDOWN' || state === 'PLAYING' || state === 'BOSS_INTRO' || state === 'BOSS' || state === 'GAME_OVER' || state === 'VICTORY';
+  const isGame = state === 'COUNTDOWN' || state === 'PLAYING' || state === 'STAGE_EXIT' || state === 'BOSS_INTRO' || state === 'BOSS' || state === 'GAME_OVER' || state === 'VICTORY';
 
   return (
     <main className="arcade-app" data-testid="page-audiostrike">
