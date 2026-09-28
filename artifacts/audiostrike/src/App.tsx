@@ -16,6 +16,8 @@ type LiveFeatures = {
   flatness: number;
   pulse: boolean;
 };
+type EnemyShape = 'CIRCLE' | 'DIAMOND' | 'TRIANGLE' | 'HEX' | 'RING';
+type ProjectileKind = 'ORB' | 'BOLT' | 'SHARD' | 'RING';
 type AudioReactiveTrack = {
   element: HTMLAudioElement;
   analyser: AnalyserNode;
@@ -31,12 +33,12 @@ type AudioReactiveTrack = {
 type EnemyEntity = {
   x: number; y: number; radius: number; health: number; maxHealth: number; speed: number;
   behavior: Behavior; fireRate: number; fireTimer: number; frame: number; zigDir: number;
-  formX: number; formY: number; diving: boolean; dvx: number; dvy: number; exiting: boolean; alive: boolean;
+  formX: number; formY: number; diving: boolean; dvx: number; dvy: number; shape: EnemyShape; projectile: ProjectileKind; exiting: boolean; alive: boolean;
 };
 type BulletEntity = { x: number; y: number; vy: number; alive: boolean };
-type EnemyBulletEntity = { x: number; y: number; vx: number; vy: number; damage: number; alive: boolean };
+type EnemyBulletEntity = { x: number; y: number; vx: number; vy: number; damage: number; alive: boolean; kind?: ProjectileKind; radius?: number; spin?: number };
 type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string };
-type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; vx: number; fireTimer: number; dyingTimer: number };
+type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; shape: EnemyShape; projectile: ProjectileKind; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; vx: number; fireTimer: number; dyingTimer: number };
 
 const W = 800;
 const H = 600;
@@ -48,6 +50,7 @@ const ENEMY_MOTION_TIME_SCALE = 0.12;
 const ENEMY_BULLET_TIME_SCALE = 0.19;
 const STAGE_EXIT_BUFFER_SECONDS = 4;
 const TOUCH_SHIP_SCREEN_OFFSET = 120;
+const SPAWN_COOLDOWN_MULTIPLIER = 2;
 const PLAYER_W = 20;
 const PLAYER_H = 32;
 const COLORS: Record<string, string> = {
@@ -168,6 +171,90 @@ function chooseBehavior(features: LiveFeatures): Behavior {
   if (features.centroid > .56) return 'ZIGZAG';
   if (features.rms > .28 && features.flatness < .38) return 'FORMATION';
   return 'PATROL';
+}
+
+function chooseEnemyShape(features: LiveFeatures, serial: number): EnemyShape {
+  const variation = (Math.sin(serial * 2.31 + features.centroid * 9) + 1) / 2;
+  if (features.low > .72 && variation > .28) return 'HEX';
+  if (features.high > .64 && features.centroid > .48) return 'TRIANGLE';
+  if (features.flatness < .28 && features.mid > .3) return 'DIAMOND';
+  if (variation > .78) return 'RING';
+  return 'CIRCLE';
+}
+
+function chooseProjectile(features: LiveFeatures, behavior: Behavior | 'BOSS'): ProjectileKind {
+  if (features.high > .68 && features.centroid > .5) return 'SHARD';
+  if (features.low > .68 && (behavior === 'TANK' || behavior === 'BOSS')) return 'RING';
+  if (features.mid > .5) return 'BOLT';
+  return 'ORB';
+}
+
+function chooseBossShape(features: LiveFeatures): EnemyShape {
+  if (features.low > .65) return 'HEX';
+  if (features.high > .62) return 'TRIANGLE';
+  if (features.flatness < .3) return 'DIAMOND';
+  return 'RING';
+}
+
+function createEnemyProjectile(x: number, y: number, vx: number, vy: number, damage: number, kind: ProjectileKind): EnemyBulletEntity {
+  const speedScale: Record<ProjectileKind, number> = { ORB: 1, BOLT: 1.12, SHARD: 1.28, RING: .78 };
+  const radius: Record<ProjectileKind, number> = { ORB: 4, BOLT: 3, SHARD: 4, RING: 6 };
+  return { x, y, vx: vx * speedScale[kind], vy: vy * speedScale[kind], damage, alive: true, kind, radius: radius[kind], spin: Math.atan2(vy, vx) };
+}
+
+function drawShape(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, shape: EnemyShape, color: string) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  if (shape === 'DIAMOND') {
+    ctx.moveTo(x, y - radius); ctx.lineTo(x + radius, y); ctx.lineTo(x, y + radius); ctx.lineTo(x - radius, y);
+  } else if (shape === 'TRIANGLE') {
+    ctx.moveTo(x, y - radius); ctx.lineTo(x + radius * .92, y + radius * .72); ctx.lineTo(x - radius * .92, y + radius * .72);
+  } else if (shape === 'HEX') {
+    for (let side = 0; side < 6; side += 1) {
+      const angle = side / 6 * Math.PI * 2 - Math.PI / 2;
+      const pointX = x + Math.cos(angle) * radius;
+      const pointY = y + Math.sin(angle) * radius;
+      if (side === 0) ctx.moveTo(pointX, pointY); else ctx.lineTo(pointX, pointY);
+    }
+  } else {
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+  }
+  ctx.closePath();
+  ctx.fill();
+  if (shape === 'RING') {
+    ctx.globalAlpha = .72;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(2, radius * .16);
+    ctx.beginPath();
+    ctx.arc(x, y, radius * .58, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+function drawEnemyProjectile(ctx: CanvasRenderingContext2D, bullet: EnemyBulletEntity) {
+  const kind = bullet.kind ?? 'ORB';
+  const radius = bullet.radius ?? 4;
+  const color = kind === 'SHARD' ? '#ffcc33' : kind === 'BOLT' ? '#ff5577' : kind === 'RING' ? '#ff8844' : '#ff3333';
+  ctx.save();
+  ctx.translate(bullet.x, bullet.y);
+  ctx.rotate((bullet.spin ?? 0) + performance.now() * .002);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  if (kind === 'BOLT') {
+    ctx.fillRect(-radius * .6, -radius * 1.8, radius * 1.2, radius * 3.6);
+  } else if (kind === 'SHARD') {
+    ctx.beginPath();
+    ctx.moveTo(0, -radius * 1.5); ctx.lineTo(radius, 0); ctx.lineTo(0, radius * 1.5); ctx.lineTo(-radius, 0);
+    ctx.closePath(); ctx.fill();
+  } else if (kind === 'RING') {
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, radius * .32, 0, Math.PI * 2); ctx.fill();
+  } else {
+    ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
 }
 
 function spawnParticles(list: ParticleEntity[], x: number, y: number, color: string, count: number, speedMin = 2, speedMax = 8) {
@@ -339,8 +426,8 @@ function Home() {
     };
     const rectsOverlap = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
     const enemyHitsPlayer = (enemy: EnemyEntity, player: { x: number; y: number }) => {
-      const nx = clamp(player.x, enemy.x - PLAYER_W / 2, player.x + PLAYER_W / 2);
-      const ny = clamp(player.y, enemy.y - PLAYER_H / 2, player.y + PLAYER_H / 2);
+      const nx = clamp(enemy.x, player.x - PLAYER_W / 2, player.x + PLAYER_W / 2);
+      const ny = clamp(enemy.y, player.y - PLAYER_H / 2, player.y + PLAYER_H / 2);
       return (enemy.x - nx) ** 2 + (enemy.y - ny) ** 2 <= enemy.radius ** 2;
     };
     const beginPlaying = () => {
@@ -370,7 +457,7 @@ function Home() {
       const game = gameRef.current;
       const features = game.bossFeatures ?? { duration: 28 };
       const hp = Math.max(165, Math.round(180 + Math.min(55, features.duration)));
-      game.boss = { x: W / 2, y: -70, radius: 55, health: hp, maxHealth: hp, phase: 'INTRO', frame: 0, vx: 1.8, fireTimer: 0, dyingTimer: 0 };
+      game.boss = { x: W / 2, y: -70, radius: 55, health: hp, maxHealth: hp, shape: 'RING', projectile: 'ORB', phase: 'INTRO', frame: 0, vx: 1.8, fireTimer: 0, dyingTimer: 0 };
       game.bullets = []; game.enemyBullets = []; game.beatIndex = 0;
       game.state = 'BOSS'; game.bossStart = performance.now();
       resetReactiveTrack(game.bossReactive);
@@ -446,13 +533,18 @@ function Home() {
           const behavior = chooseBehavior(live);
           const intensity = clamp(live.rms * .65 + live.onset * .35, .12, 1);
           const count = Math.min(5, 1 + Math.floor(intensity * 3) + (live.onset > .8 ? 1 : 0));
+          const spawnSerial = game.spawnIndex;
+          game.spawnIndex += 1;
           for (let enemyIndex = 0; enemyIndex < count && game.enemies.length < 20; enemyIndex += 1) {
-            const radius = 10 + live.low * 34;
+            const variation = (Math.sin((spawnSerial + enemyIndex) * 2.17 + live.centroid * 8) + 1) / 2;
+            const radius = clamp(9 + live.low * 22 + variation * 13 + live.high * 5, 9, 48);
             const x = behavior === 'FORMATION' ? (W / (count + 1)) * (enemyIndex + 1) : random(radius + 18, W - radius - 18);
             const health = 1 + Math.round(live.low * 5);
-            game.enemies.push({ x, y: -radius - 12, radius, health, maxHealth: health, speed: 2.4 + live.high * 6.2, behavior, fireRate: live.mid > .4 ? Math.round(150 - live.mid * 55) : 0, fireTimer: randomInt(24, 120), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, exiting: false, alive: true });
+            const shape = chooseEnemyShape(live, spawnSerial + enemyIndex);
+            const projectile = chooseProjectile(live, behavior);
+            game.enemies.push({ x, y: -radius - 12, radius, health, maxHealth: health, speed: 2.4 + live.high * 6.2, behavior, fireRate: live.mid > .4 ? Math.round(150 - live.mid * 55) : 0, fireTimer: randomInt(24, 120), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, shape, projectile, exiting: false, alive: true });
           }
-          game.spawnCooldown = clamp(58 - intensity * 22 - live.high * 5, 28, 58);
+          game.spawnCooldown = clamp((58 - intensity * 22 - live.high * 5) * SPAWN_COOLDOWN_MULTIPLIER, 56, 116);
         }
         if (!game.stageDone && (songTime >= features.duration || Boolean(stageAudioRef.current?.ended))) game.stageDone = true;
         if (game.stageDone && game.enemies.length === 0) beginBossIntro();
@@ -472,12 +564,13 @@ function Home() {
             if (enemy.fireTimer <= 0) {
               enemy.fireTimer = enemy.fireRate;
               const dx = player.x - enemy.x, dy = player.y - enemy.y, distance = Math.hypot(dx, dy) || 1;
-               if (enemy.behavior === 'SHOOTER') { const angle = Math.atan2(dy, dx); game.enemyBullets.push({ x: enemy.x, y: enemy.y, vx: Math.cos(angle) * 7.4, vy: Math.sin(angle) * 7.4, damage: 4, alive: true }); }
-               else game.enemyBullets.push({ x: enemy.x, y: enemy.y, vx: dx / distance * 7.4, vy: dy / distance * 7.4, damage: enemy.behavior === 'TANK' ? 9 : 6, alive: true });
+                if (enemy.behavior === 'SHOOTER') { const angle = Math.atan2(dy, dx); game.enemyBullets.push(createEnemyProjectile(enemy.x, enemy.y, Math.cos(angle) * 7.4, Math.sin(angle) * 7.4, 4, enemy.projectile)); }
+                else game.enemyBullets.push(createEnemyProjectile(enemy.x, enemy.y, dx / distance * 7.4, dy / distance * 7.4, enemy.behavior === 'TANK' ? 9 : 6, enemy.projectile));
             }
           }
           if (enemy.y > H + 70 || enemy.x < -90 || enemy.x > W + 90) enemy.alive = false;
-           if (!enemy.exiting && enemyHitsPlayer(enemy, player)) { enemy.alive = false; const impactDamage = enemy.behavior === 'TANK' ? 25 : enemy.behavior === 'DIVE' ? 20 : enemy.behavior === 'SWARM' ? 10 : 14; if (player.invincible <= 0) { player.health = Math.max(0, player.health - impactDamage); player.invincible = 90; spawnParticles(game.particles, player.x, player.y, '#ff3333', 14); if (player.health <= 0) gameOver(); } }
+            const enemyOnScreen = enemy.y + enemy.radius >= 0 && enemy.y - enemy.radius <= H;
+            if (!enemy.exiting && enemyOnScreen && enemyHitsPlayer(enemy, player)) { enemy.alive = false; const impactDamage = enemy.behavior === 'TANK' ? 25 : enemy.behavior === 'DIVE' ? 20 : enemy.behavior === 'SWARM' ? 10 : 14; if (player.invincible <= 0) { player.health = Math.max(0, player.health - impactDamage); player.invincible = 90; spawnParticles(game.particles, player.x, player.y, '#ff3333', 14); if (player.health <= 0) gameOver(); } }
         }
         game.enemies = game.enemies.filter((enemy) => enemy.alive);
       } else if (game.boss) {
@@ -489,6 +582,8 @@ function Home() {
           const live = readReactiveTrack(game.bossReactive);
           const healthRatio = boss.health / boss.maxHealth;
           boss.phase = healthRatio > .66 ? 'PHASE1' : healthRatio > .33 ? 'PHASE2' : 'PHASE3';
+          boss.shape = chooseBossShape(live);
+          boss.projectile = chooseProjectile(live, 'BOSS');
           game.currentBehavior = live.pulse ? 'BOSS PULSE' : 'BOSS TRACKING';
           boss.fireTimer -= delta;
           if (live.pulse && live.high > .5) boss.vx *= -1;
@@ -499,7 +594,7 @@ function Home() {
             if (boss.fireTimer <= 0 && (live.pulse || live.rms > .72)) {
               boss.fireTimer = clamp(54 - live.onset * 16 - live.mid * 8, 24, 54);
               const dx = player.x - boss.x, dy = player.y - boss.y, distance = Math.hypot(dx, dy) || 1;
-              game.enemyBullets.push({ x: boss.x, y: boss.y, vx: dx / distance * 8, vy: dy / distance * 8, damage: 8, alive: true });
+              game.enemyBullets.push(createEnemyProjectile(boss.x, boss.y, dx / distance * 8, dy / distance * 8, 8, boss.projectile));
             }
           } else if (boss.phase === 'PHASE2') {
             boss.x += boss.vx * (2 + live.high * 5) * delta;
@@ -511,7 +606,7 @@ function Home() {
               const spreadCount = live.high > .72 ? 5 : 3;
               for (let spread = 0; spread < spreadCount; spread += 1) {
                 const angle = base + (spread - (spreadCount - 1) / 2) * (.16 + live.high * .08);
-                game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 8.4, vy: Math.sin(angle) * 8.4, damage: 5, alive: true });
+                game.enemyBullets.push(createEnemyProjectile(boss.x, boss.y, Math.cos(angle) * 8.4, Math.sin(angle) * 8.4, 5, boss.projectile));
               }
             }
           } else {
@@ -522,7 +617,7 @@ function Home() {
               const rayCount = 8 + Math.round(live.high * 4);
               for (let ray = 0; ray < rayCount; ray += 1) {
                 const angle = (ray / rayCount) * Math.PI * 2 + boss.frame * (.025 + live.high * .05);
-                game.enemyBullets.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * (7.4 + live.low * 1.2), vy: Math.sin(angle) * (7.4 + live.low * 1.2), damage: 3, alive: true });
+                game.enemyBullets.push(createEnemyProjectile(boss.x, boss.y, Math.cos(angle) * (7.4 + live.low * 1.2), Math.sin(angle) * (7.4 + live.low * 1.2), 3, boss.projectile));
               }
             }
           }
@@ -534,7 +629,7 @@ function Home() {
         if (!bullet.alive) continue;
         for (const enemyBullet of game.enemyBullets) {
           if (!enemyBullet.alive) continue;
-          if (Math.hypot(bullet.x - enemyBullet.x, bullet.y - enemyBullet.y) <= 9) {
+           if (Math.hypot(bullet.x - enemyBullet.x, bullet.y - enemyBullet.y) <= (enemyBullet.radius ?? 4) + 5) {
             bullet.alive = false;
             enemyBullet.alive = false;
             spawnParticles(game.particles, enemyBullet.x, enemyBullet.y, '#00ffff', 5, 1, 4);
@@ -550,7 +645,7 @@ function Home() {
         if (game.state === 'BOSS' && boss && boss.phase !== 'DYING' && Math.hypot(bullet.x - boss.x, bullet.y - boss.y) <= boss.radius + 4) { bullet.alive = false; boss.health = Math.max(0, boss.health - 1); game.score += 40; spawnParticles(game.particles, bullet.x, bullet.y, '#ffaa00', 5, 2, 6); if (boss.health <= 0) { boss.phase = 'DYING'; boss.dyingTimer = 0; } }
       }
       const playerRect = { x: player.x - PLAYER_W / 2, y: player.y - PLAYER_H / 2, w: PLAYER_W, h: PLAYER_H };
-      for (const bullet of game.enemyBullets) { if (bullet.alive && rectsOverlap({ x: bullet.x - 4, y: bullet.y - 4, w: 8, h: 8 }, playerRect)) { bullet.alive = false; if (player.invincible <= 0) { player.health = Math.max(0, player.health - bullet.damage); player.invincible = 90; spawnParticles(game.particles, player.x, player.y, '#ff3333', 14); if (player.health <= 0) gameOver(); } } }
+       for (const bullet of game.enemyBullets) { const radius = bullet.radius ?? 4; if (bullet.alive && rectsOverlap({ x: bullet.x - radius, y: bullet.y - radius, w: radius * 2, h: radius * 2 }, playerRect)) { bullet.alive = false; if (player.invincible <= 0) { player.health = Math.max(0, player.health - bullet.damage); player.invincible = 90; spawnParticles(game.particles, player.x, player.y, '#ff3333', 14); if (player.health <= 0) gameOver(); } } }
       game.bullets = game.bullets.filter((bullet) => bullet.alive);
       game.enemyBullets = game.enemyBullets.filter((bullet) => bullet.alive);
       for (const particle of game.particles) { particle.x += particle.vx * delta * .06; particle.y += particle.vy * delta * .06; particle.vy += .09 * delta; particle.life -= delta; }
@@ -571,9 +666,31 @@ function Home() {
       for (const particle of game.particles) { ctx.globalAlpha = Math.max(0, particle.life / particle.maxLife); ctx.fillStyle = particle.color; ctx.fillRect(particle.x - 2, particle.y - 2, 4, 4); }
       ctx.globalAlpha = 1;
       for (const bullet of game.bullets) { ctx.fillStyle = '#ffff00'; ctx.fillRect(bullet.x - 1.5, bullet.y, 3, 10); }
-      for (const bullet of game.enemyBullets) { ctx.fillStyle = '#ff3333'; ctx.beginPath(); ctx.arc(bullet.x, bullet.y, 4, 0, Math.PI * 2); ctx.fill(); }
-      for (const enemy of game.enemies) { const color = COLORS[enemy.behavior]; ctx.globalAlpha = .85; ctx.fillStyle = color; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 3, 0, Math.PI * 2); ctx.stroke(); if (enemy.maxHealth > 1) { ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius - 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * enemy.health / enemy.maxHealth); ctx.stroke(); } }
-      if (game.boss) { const boss = game.boss; const color = boss.phase === 'PHASE3' ? '#ff2244' : boss.phase === 'PHASE2' ? '#ff8800' : '#4488ff'; const gradient = ctx.createRadialGradient(boss.x, boss.y, 0, boss.x, boss.y, boss.radius * 2.2); gradient.addColorStop(0, `${color}55`); gradient.addColorStop(1, 'transparent'); ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius * 2.2, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = .9; ctx.fillStyle = color; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; for (let ring = 1; ring <= 2; ring += 1) { ctx.strokeStyle = color; ctx.globalAlpha = .32 / ring; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius + ring * 14, 0, Math.PI * 2); ctx.stroke(); } ctx.globalAlpha = 1; }
+       for (const bullet of game.enemyBullets) drawEnemyProjectile(ctx, bullet);
+       for (const enemy of game.enemies) {
+         const color = COLORS[enemy.behavior];
+         ctx.globalAlpha = .85;
+         drawShape(ctx, enemy.x, enemy.y, enemy.radius, enemy.shape, color);
+         ctx.globalAlpha = 1;
+         ctx.strokeStyle = color;
+         ctx.lineWidth = 2;
+         ctx.beginPath();
+         ctx.arc(enemy.x, enemy.y, enemy.radius + 3, 0, Math.PI * 2);
+         ctx.stroke();
+         if (enemy.maxHealth > 1) { ctx.strokeStyle = '#00ff00'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius - 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * enemy.health / enemy.maxHealth); ctx.stroke(); }
+       }
+       if (game.boss) {
+         const boss = game.boss;
+         const color = boss.phase === 'PHASE3' ? '#ff2244' : boss.phase === 'PHASE2' ? '#ff8800' : '#4488ff';
+         const gradient = ctx.createRadialGradient(boss.x, boss.y, 0, boss.x, boss.y, boss.radius * 2.2);
+         gradient.addColorStop(0, `${color}55`); gradient.addColorStop(1, 'transparent');
+         ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius * 2.2, 0, Math.PI * 2); ctx.fill();
+         ctx.globalAlpha = .9;
+         drawShape(ctx, boss.x, boss.y, boss.radius, boss.shape, color);
+         ctx.globalAlpha = 1;
+         for (let ring = 1; ring <= 2; ring += 1) { ctx.strokeStyle = color; ctx.globalAlpha = .32 / ring; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius + ring * 14, 0, Math.PI * 2); ctx.stroke(); }
+         ctx.globalAlpha = 1;
+       }
       const showPlayer = game.state === 'PLAYING' || game.state === 'BOSS' || game.state === 'COUNTDOWN';
       drawPlayer(ctx, game.player.x, game.player.y, game.player.frame, !(game.player.invincible > 0 && Math.floor(game.player.invincible / 5) % 2 === 1) && showPlayer);
     };
