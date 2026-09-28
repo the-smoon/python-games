@@ -18,6 +18,7 @@ type LiveFeatures = {
 };
 type EnemyShape = 'CIRCLE' | 'DIAMOND' | 'TRIANGLE' | 'HEX' | 'RING';
 type ProjectileKind = 'ORB' | 'BOLT' | 'SHARD' | 'RING';
+type BossFirePattern = 'TRACK' | 'BURST' | 'RADIAL';
 type AudioReactiveTrack = {
   element: HTMLAudioElement;
   analyser: AnalyserNode;
@@ -38,19 +39,20 @@ type EnemyEntity = {
 type BulletEntity = { x: number; y: number; vy: number; alive: boolean };
 type EnemyBulletEntity = { x: number; y: number; vx: number; vy: number; damage: number; alive: boolean; kind?: ProjectileKind; radius?: number; spin?: number };
 type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string };
-type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; shape: EnemyShape; projectile: ProjectileKind; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; vx: number; fireTimer: number; dyingTimer: number };
+type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; shape: EnemyShape; projectile: ProjectileKind; pattern: BossFirePattern; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; vx: number; fireTimer: number; dyingTimer: number };
 
 const W = 800;
 const H = 600;
 const PLAYER_MAX_HEALTH = 100;
-const PLAYER_BULLET_SPEED = 96;
-const PLAYER_FIRE_INTERVAL = 2;
+const PLAYER_BULLET_SPEED = 48;
+const PLAYER_FIRE_INTERVAL = 8;
 const BULLET_TIME_SCALE = 0.22;
-const ENEMY_MOTION_TIME_SCALE = 0.12;
+const ENEMY_MOTION_TIME_SCALE = 0.18;
 const ENEMY_BULLET_TIME_SCALE = 0.19;
 const STAGE_LEVEL_SECONDS = 60;
 const TOUCH_SHIP_SCREEN_OFFSET = 120;
-const SPAWN_COOLDOWN_MULTIPLIER = 2;
+const SPAWN_COOLDOWN_MULTIPLIER = 1.7;
+const PLAYER_MOVE_SPEED = 22;
 const PLAYER_W = 20;
 const PLAYER_H = 32;
 const COLORS: Record<string, string> = {
@@ -58,6 +60,11 @@ const COLORS: Record<string, string> = {
   DIVE: '#ff8800', SHOOTER: '#ff4444', TANK: '#cc44ff',
 };
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+const moveTowards = (current: number, target: number, maxDistance: number) => {
+  const distance = target - current;
+  if (Math.abs(distance) <= maxDistance) return target;
+  return current + Math.sign(distance) * maxDistance;
+};
 const random = (min: number, max: number) => min + Math.random() * (max - min);
 const randomInt = (min: number, max: number) => Math.floor(random(min, max + 1));
 
@@ -194,6 +201,15 @@ function chooseBossShape(features: LiveFeatures): EnemyShape {
   if (features.high > .62) return 'TRIANGLE';
   if (features.flatness < .3) return 'DIAMOND';
   return 'RING';
+}
+
+function chooseBossFirePattern(features: LiveFeatures, serial: number): BossFirePattern {
+  const variation = (Math.sin(serial * .071 + features.centroid * 8) + 1) / 2;
+  const burstSignal = features.high * .52 + features.onset * .32 + features.mid * .12 + variation * .16 + (features.pulse ? .12 : 0);
+  const radialSignal = features.low * .55 + features.rms * .25 + (1 - features.centroid) * .12 + variation * .16;
+  if (burstSignal > .7 && features.high > .34) return 'BURST';
+  if (radialSignal > .68 && features.low > .34) return 'RADIAL';
+  return 'TRACK';
 }
 
 function createEnemyProjectile(x: number, y: number, vx: number, vy: number, damage: number, kind: ProjectileKind): EnemyBulletEntity {
@@ -460,7 +476,7 @@ function Home() {
       game.player.x = W / 2;
       game.player.y = H - 80;
       game.player.invincible = 0;
-      game.boss = { x: W / 2, y: -70, radius: 55, health: hp, maxHealth: hp, shape: 'RING', projectile: 'ORB', phase: 'INTRO', frame: 0, vx: 1.8, fireTimer: 0, dyingTimer: 0 };
+      game.boss = { x: W / 2, y: -70, radius: 55, health: hp, maxHealth: hp, shape: 'RING', projectile: 'ORB', pattern: 'TRACK', phase: 'INTRO', frame: 0, vx: 1.8, fireTimer: 0, dyingTimer: 0 };
       game.bullets = []; game.enemyBullets = []; game.beatIndex = 0;
       game.state = 'BOSS'; game.bossStart = performance.now();
       resetReactiveTrack(game.bossReactive);
@@ -520,9 +536,11 @@ function Home() {
       }
       if (game.state !== 'PLAYING' && game.state !== 'BOSS') return;
       const player = game.player;
-      const pointerSmoothing = pointerRef.current.isTouch ? .72 : .28;
-      player.x += (clamp(pointerRef.current.x, 14, W - 14) - player.x) * pointerSmoothing;
-      player.y += (clamp(pointerRef.current.y, 28, H - 28) - player.y) * pointerSmoothing;
+      const targetX = clamp(pointerRef.current.x, 14, W - 14);
+      const targetY = clamp(pointerRef.current.y, 28, H - 28);
+      const movementStep = PLAYER_MOVE_SPEED * delta;
+      player.x = moveTowards(player.x, targetX, movementStep);
+      player.y = moveTowards(player.y, targetY, movementStep);
       player.frame += 1;
       player.invincible = Math.max(0, player.invincible - delta);
       player.fireTimer -= delta;
@@ -556,7 +574,7 @@ function Home() {
             const projectile = chooseProjectile(live, behavior);
             game.enemies.push({ x, y: -radius - 12, radius, health, maxHealth: health, speed: 2.4 + live.high * 6.2, behavior, fireRate: live.mid > .4 ? Math.round(150 - live.mid * 55) : 0, fireTimer: randomInt(24, 120), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, shape, projectile, exiting: false, alive: true });
           }
-          game.spawnCooldown = clamp((58 - intensity * 22 - live.high * 5) * SPAWN_COOLDOWN_MULTIPLIER, 56, 116);
+          game.spawnCooldown = clamp((58 - intensity * 22 - live.high * 5) * SPAWN_COOLDOWN_MULTIPLIER, 48, 100);
         }
         if (!game.stageDone && songTime >= STAGE_LEVEL_SECONDS) {
           game.stageDone = true;
@@ -603,6 +621,7 @@ function Home() {
           boss.phase = healthRatio > .66 ? 'PHASE1' : healthRatio > .33 ? 'PHASE2' : 'PHASE3';
           boss.shape = chooseBossShape(live);
           boss.projectile = chooseProjectile(live, 'BOSS');
+          boss.pattern = chooseBossFirePattern(live, boss.frame);
           game.currentBehavior = live.pulse ? 'BOSS PULSE' : 'BOSS TRACKING';
           boss.fireTimer -= delta;
           if (live.pulse && live.high > .5) boss.vx *= -1;
@@ -610,16 +629,21 @@ function Home() {
             boss.x += boss.vx * (1.2 + live.high * 3.6) * delta;
             boss.y = 105 + Math.sin(boss.frame * (.012 + live.mid * .02)) * (18 + live.low * 42);
             if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1;
-            if (boss.fireTimer <= 0 && (live.pulse || live.rms > .72)) {
-              boss.fireTimer = clamp(54 - live.onset * 16 - live.mid * 8, 24, 54);
-              const dx = player.x - boss.x, dy = player.y - boss.y, distance = Math.hypot(dx, dy) || 1;
-              game.enemyBullets.push(createEnemyProjectile(boss.x, boss.y, dx / distance * 8, dy / distance * 8, 8, boss.projectile));
-            }
           } else if (boss.phase === 'PHASE2') {
             boss.x += boss.vx * (2 + live.high * 5) * delta;
             boss.y = 110 + Math.sin(boss.frame * (.015 + live.mid * .025)) * (25 + live.low * 55);
             if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1;
-            if (boss.fireTimer <= 0 && (live.pulse || live.rms > .68)) {
+          } else {
+            boss.x += (player.x - boss.x) * (.012 + live.mid * .012) * delta;
+            boss.y += (Math.min(player.y - 120, 200) - boss.y) * (.008 + live.low * .012) * delta;
+          }
+          const fireThreshold = boss.phase === 'PHASE1' ? .72 : boss.phase === 'PHASE2' ? .68 : .62;
+          if (boss.fireTimer <= 0 && (live.pulse || live.rms > fireThreshold)) {
+            if (boss.pattern === 'TRACK') {
+              boss.fireTimer = clamp(54 - live.onset * 16 - live.mid * 8, 24, 54);
+              const dx = player.x - boss.x, dy = player.y - boss.y, distance = Math.hypot(dx, dy) || 1;
+              game.enemyBullets.push(createEnemyProjectile(boss.x, boss.y, dx / distance * 8, dy / distance * 8, 8, boss.projectile));
+            } else if (boss.pattern === 'BURST') {
               boss.fireTimer = clamp(45 - live.onset * 13 - live.mid * 7, 20, 45);
               const base = Math.atan2(player.y - boss.y, player.x - boss.x);
               const spreadCount = live.high > .72 ? 5 : 3;
@@ -627,11 +651,7 @@ function Home() {
                 const angle = base + (spread - (spreadCount - 1) / 2) * (.16 + live.high * .08);
                 game.enemyBullets.push(createEnemyProjectile(boss.x, boss.y, Math.cos(angle) * 8.4, Math.sin(angle) * 8.4, 5, boss.projectile));
               }
-            }
-          } else {
-            boss.x += (player.x - boss.x) * (.012 + live.mid * .012) * delta;
-            boss.y += (Math.min(player.y - 120, 200) - boss.y) * (.008 + live.low * .012) * delta;
-            if (boss.fireTimer <= 0 && (live.pulse || live.rms > .62)) {
+            } else {
               boss.fireTimer = clamp(36 - live.onset * 10 - live.low * 7, 16, 36);
               const rayCount = 8 + Math.round(live.high * 4);
               for (let ray = 0; ray < rayCount; ray += 1) {
