@@ -258,10 +258,40 @@
   position: absolute;
   left: 12px;
   right: 12px;
-  bottom: 10px;
+  bottom: 22px;
   z-index: 2;
   pointer-events: none;
 }
+
+.hull-status {
+  flex: none;
+  padding: 4px 7px;
+  background: rgba(7,8,15,.75);
+}
+
+.steering-hint {
+  max-width: 42%;
+  text-align: right;
+}
+
+.audio-alert {
+  position: absolute;
+  z-index: 5;
+  top: 66px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(35, 19, 13, .96);
+  border: 1px solid #fdba74;
+  color: #fed7aa;
+  font: 10px 'Space Mono', monospace;
+}
+
+.audio-alert button { flex: none; }
 
 .health-pips {
   display: flex;
@@ -345,12 +375,13 @@
 
 @media (max-width: 640px) {
   .game-shell {
+    min-height: 100svh;
     padding: 0;
   }
 
   .game-frame {
     width: 100vw;
-    height: 100dvh;
+    height: 100svh;
     aspect-ratio: auto;
     border-top: 0;
     border-bottom: 0;
@@ -369,9 +400,10 @@
   }
 
   .hud-bottom {
-    bottom: max(14px, env(safe-area-inset-bottom));
+    bottom: max(24px, calc(env(safe-area-inset-bottom) + 14px));
   }
 
+  .steering-hint { display: none; }
   .hud-chip {
     min-width: 66px;
     padding: 4px 6px;
