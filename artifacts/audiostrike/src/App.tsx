@@ -50,9 +50,11 @@ const BULLET_TIME_SCALE = 0.22;
 const ENEMY_MOTION_TIME_SCALE = 0.18;
 const ENEMY_BULLET_TIME_SCALE = 0.19;
 const STAGE_LEVEL_SECONDS = 60;
-const TOUCH_SHIP_SCREEN_OFFSET = 120;
 const SPAWN_COOLDOWN_MULTIPLIER = 1.7;
-const PLAYER_MOVE_SPEED = 22;
+const PLAYER_MAX_SPEED = 5.5;
+const PLAYER_ACCELERATION = .32;
+const PLAYER_DECELERATION = .45;
+const JOYSTICK_RADIUS = 62;
 const PLAYER_W = 20;
 const PLAYER_H = 32;
 const COLORS: Record<string, string> = {
@@ -60,11 +62,6 @@ const COLORS: Record<string, string> = {
   DIVE: '#ff8800', SHOOTER: '#ff4444', TANK: '#cc44ff',
 };
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-const moveTowards = (current: number, target: number, maxDistance: number) => {
-  const distance = target - current;
-  if (Math.abs(distance) <= maxDistance) return target;
-  return current + Math.sign(distance) * maxDistance;
-};
 const random = (min: number, max: number) => min + Math.random() * (max - min);
 const randomInt = (min: number, max: number) => Math.floor(random(min, max + 1));
 
@@ -313,14 +310,35 @@ function drawPlayer(ctx: CanvasRenderingContext2D, x: number, y: number, frame: 
   ctx.beginPath(); ctx.roundRect(x - 3, y + halfH, 6, Math.floor(exhaust / 2), 3); ctx.fill();
 }
 
+type Joystick = { pointerId: number | null; x: number; y: number; dx: number; dy: number };
+const neutralJoystick = (): Joystick => ({ pointerId: null, x: 0, y: 0, dx: 0, dy: 0 });
+
+function drawJoystick(ctx: CanvasRenderingContext2D, joystick: Joystick) {
+  if (joystick.pointerId === null) return;
+  const { x, y, dx, dy } = joystick;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 229, 255, .12)';
+  ctx.strokeStyle = 'rgba(125, 255, 207, .65)';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(x, y, JOYSTICK_RADIUS, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = 'rgba(0, 229, 255, .4)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dx * JOYSTICK_RADIUS, y + dy * JOYSTICK_RADIUS); ctx.stroke();
+  ctx.fillStyle = 'rgba(0, 229, 255, .52)';
+  ctx.strokeStyle = 'rgba(205, 255, 245, .95)';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(x + dx * JOYSTICK_RADIUS, y + dy * JOYSTICK_RADIUS, 18, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
 function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageInputRef = useRef<HTMLInputElement>(null);
   const bossInputRef = useRef<HTMLInputElement>(null);
   const stageAudioRef = useRef<HTMLAudioElement | null>(null);
   const bossAudioRef = useRef<HTMLAudioElement | null>(null);
-  const pointerRef = useRef({ x: W / 2, y: H - 80, isTouch: false });
-  const gameRef = useRef({ state: 'UPLOAD' as GameState, stageFeatures: null as FeatureSet | null, bossFeatures: null as FeatureSet | null, audioContext: null as AudioContext | null, stageReactive: null as AudioReactiveTrack | null, bossReactive: null as AudioReactiveTrack | null, player: { x: W / 2, y: H - 80, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [] as EnemyEntity[], bullets: [] as BulletEntity[], enemyBullets: [] as EnemyBulletEntity[], particles: [] as ParticleEntity[], boss: null as BossEntity | null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, stageExitTimer: 0, introTimer: 0, countdown: 3, countdownTimer: 0, victoryTimer: 0, currentBehavior: '' });
+  const joystickRef = useRef<Joystick>(neutralJoystick());
+  const gameRef = useRef({ state: 'UPLOAD' as GameState, stageFeatures: null as FeatureSet | null, bossFeatures: null as FeatureSet | null, audioContext: null as AudioContext | null, stageReactive: null as AudioReactiveTrack | null, bossReactive: null as AudioReactiveTrack | null, player: { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [] as EnemyEntity[], bullets: [] as BulletEntity[], enemyBullets: [] as EnemyBulletEntity[], particles: [] as ParticleEntity[], boss: null as BossEntity | null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, stageExitTimer: 0, introTimer: 0, countdown: 3, countdownTimer: 0, victoryTimer: 0, currentBehavior: '' });
   const [state, setState] = useState<GameState>('UPLOAD');
   const [stageFile, setStageFile] = useState<File | null>(null);
   const [bossFile, setBossFile] = useState<File | null>(null);
@@ -402,13 +420,13 @@ function Home() {
 
   const beginCountdown = useCallback(() => {
     const game = gameRef.current;
-    game.player = { x: W / 2, y: H - 80, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 };
+    game.player = { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 };
     game.enemies = []; game.bullets = []; game.enemyBullets = []; game.particles = []; game.boss = null;
       game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.spawnCooldown = 0; game.stageDone = false; game.stageExitTimer = 0; game.introTimer = 0;
     resetReactiveTrack(game.stageReactive);
     resetReactiveTrack(game.bossReactive);
     game.countdown = 3; game.countdownTimer = 58; game.currentBehavior = 'SCANNING';
-    pointerRef.current = { x: W / 2, y: H - 80, isTouch: false };
+    joystickRef.current = neutralJoystick();
     setCountdown(3);
     setHud({ score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1 });
     syncState('COUNTDOWN');
@@ -459,6 +477,8 @@ function Home() {
     };
     const beginBossIntro = () => {
       const game = gameRef.current;
+      joystickRef.current = neutralJoystick();
+      game.player.vx = 0; game.player.vy = 0;
       game.state = 'BOSS_INTRO'; game.introTimer = 180; game.enemies = []; game.enemyBullets = [];
       stageAudioRef.current?.pause();
       if (bossAudioRef.current) {
@@ -474,7 +494,9 @@ function Home() {
       const features = game.bossFeatures ?? { duration: 28 };
       const hp = Math.max(165, Math.round(180 + Math.min(55, features.duration)));
       game.player.x = W / 2;
-      game.player.y = H - 80;
+      game.player.y = H / 2;
+      game.player.vx = 0; game.player.vy = 0;
+      joystickRef.current = neutralJoystick();
       game.player.invincible = 0;
       game.boss = { x: W / 2, y: -70, radius: 55, health: hp, maxHealth: hp, shape: 'RING', projectile: 'ORB', pattern: 'TRACK', phase: 'INTRO', frame: 0, vx: 1.8, fireTimer: 0, dyingTimer: 0 };
       game.bullets = []; game.enemyBullets = []; game.beatIndex = 0;
@@ -485,10 +507,12 @@ function Home() {
       syncState('BOSS');
     };
     const gameOver = () => {
+      joystickRef.current = neutralJoystick();
       stageAudioRef.current?.pause(); bossAudioRef.current?.pause();
       syncState('GAME_OVER');
     };
     const victory = () => {
+      joystickRef.current = neutralJoystick();
       bossAudioRef.current?.pause();
       gameRef.current.victoryTimer = 360;
       syncState('VICTORY');
@@ -536,11 +560,23 @@ function Home() {
       }
       if (game.state !== 'PLAYING' && game.state !== 'BOSS') return;
       const player = game.player;
-      const targetX = clamp(pointerRef.current.x, 14, W - 14);
-      const targetY = clamp(pointerRef.current.y, 28, H - 28);
-      const movementStep = PLAYER_MOVE_SPEED * delta;
-      player.x = moveTowards(player.x, targetX, movementStep);
-      player.y = moveTowards(player.y, targetY, movementStep);
+      const joystick = joystickRef.current;
+      const targetVx = joystick.dx * PLAYER_MAX_SPEED;
+      const targetVy = joystick.dy * PLAYER_MAX_SPEED;
+      const changeX = targetVx - player.vx;
+      const changeY = targetVy - player.vy;
+      const distance = Math.hypot(changeX, changeY);
+      const velocityStep = (joystick.pointerId === null ? PLAYER_DECELERATION : PLAYER_ACCELERATION) * delta;
+      if (distance <= velocityStep) {
+        player.vx = targetVx; player.vy = targetVy;
+      } else {
+        player.vx += changeX / distance * velocityStep;
+        player.vy += changeY / distance * velocityStep;
+      }
+      player.x = clamp(player.x + player.vx * delta, 22, W - 22);
+      player.y = clamp(player.y + player.vy * delta, 28, H - 28);
+      if ((player.x === 22 && player.vx < 0) || (player.x === W - 22 && player.vx > 0)) player.vx = 0;
+      if ((player.y === 28 && player.vy < 0) || (player.y === H - 28 && player.vy > 0)) player.vy = 0;
       player.frame += 1;
       player.invincible = Math.max(0, player.invincible - delta);
       player.fireTimer -= delta;
@@ -582,6 +618,8 @@ function Home() {
           for (const enemy of game.enemies) enemy.exiting = true;
           game.enemyBullets = [];
           stageAudioRef.current?.pause();
+          joystickRef.current = neutralJoystick();
+          player.vx = 0; player.vy = 0;
           game.state = 'STAGE_EXIT';
           syncState('STAGE_EXIT');
           return;
@@ -732,6 +770,7 @@ function Home() {
        }
       const showPlayer = game.state === 'PLAYING' || game.state === 'STAGE_EXIT' || game.state === 'BOSS' || game.state === 'COUNTDOWN';
       drawPlayer(ctx, game.player.x, game.player.y, game.player.frame, !(game.player.invincible > 0 && Math.floor(game.player.invincible / 5) % 2 === 1) && showPlayer);
+       if (game.state === 'PLAYING' || game.state === 'BOSS') drawJoystick(ctx, joystickRef.current);
     };
     const loop = (now: number) => {
       const delta = Math.min(2.2, (now - last) / 16.67);
@@ -746,16 +785,35 @@ function Home() {
 
   useEffect(() => () => resetAudio(), [resetAudio]);
 
-  const updatePointer = (event: React.PointerEvent<HTMLCanvasElement>) => {
+  const pointerPosition = (event: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left) * W / rect.width;
-    const touchY = (event.clientY - rect.top) * H / rect.height;
-    const isTouch = event.pointerType === 'touch' || event.pointerType === 'pen' || (event.pointerType === 'mouse' && navigator.maxTouchPoints > 0);
-    const touchOffset = TOUCH_SHIP_SCREEN_OFFSET * H / rect.height;
-    const y = isTouch ? touchY - touchOffset : touchY;
-    pointerRef.current = { x, y, isTouch };
+    return { x: (event.clientX - rect.left) * W / rect.width, y: (event.clientY - rect.top) * H / rect.height };
+  };
+  const onJoystickDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if ((gameRef.current.state !== 'PLAYING' && gameRef.current.state !== 'BOSS') || joystickRef.current.pointerId !== null) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    const { x, y } = pointerPosition(event);
+    joystickRef.current = { pointerId: event.pointerId, x, y, dx: 0, dy: 0 };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onJoystickMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const joystick = joystickRef.current;
+    if (joystick.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const { x, y } = pointerPosition(event);
+    const offsetX = x - joystick.x;
+    const offsetY = y - joystick.y;
+    const scale = Math.max(JOYSTICK_RADIUS, Math.hypot(offsetX, offsetY));
+    joystick.dx = offsetX / scale;
+    joystick.dy = offsetY / scale;
+  };
+  const onJoystickRelease = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (joystickRef.current.pointerId !== event.pointerId) return;
+    joystickRef.current = neutralJoystick();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
   const fileLabel = (file: File | null) => file ? `${file.name} · ${(file.size / 1048576).toFixed(1)} MB` : 'No track selected';
@@ -796,23 +854,23 @@ function Home() {
                 <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-slate-600"><Volume2 className="h-3 w-3" /> MP3 · WAV · OGG · FLAC · M4A · AAC</div>
               </>
             )}
-            <div className="mt-10 grid grid-cols-3 gap-2 text-center font-mono text-[9px] uppercase tracking-[.12em] text-slate-600"><span className="border-t border-slate-800 pt-3">Drag to fly</span><span className="border-t border-slate-800 pt-3">Auto-fire</span><span className="border-t border-slate-800 pt-3">Three phases</span></div>
+            <div className="mt-10 grid grid-cols-3 gap-2 text-center font-mono text-[9px] uppercase tracking-[.12em] text-slate-600"><span className="border-t border-slate-800 pt-3">Press + drag joystick to steer</span><span className="border-t border-slate-800 pt-3">Auto-fire</span><span className="border-t border-slate-800 pt-3">Three phases</span></div>
           </div>
         </section>
       )}
       {isGame && (
         <section className="game-shell" data-testid="panel-game">
           <div className="game-frame">
-            <canvas ref={canvasRef} className="game-canvas" onPointerMove={updatePointer} onPointerDown={updatePointer} data-testid="canvas-game" aria-label="AudioStrike game field" />
+            <canvas ref={canvasRef} className="game-canvas" onPointerDown={onJoystickDown} onPointerMove={onJoystickMove} onPointerUp={onJoystickRelease} onPointerCancel={onJoystickRelease} onLostPointerCapture={onJoystickRelease} data-testid="canvas-game" aria-label="AudioStrike game field. Press and drag to steer with a joystick." />
             <div className="hud-top">
               <div className="hud-chip"><div className="font-mono text-[8px] uppercase tracking-[.16em] text-slate-500">Score</div><div className="font-mono text-sm font-bold text-cyan-200" data-testid="text-score">{String(hud.score).padStart(6, '0')}</div></div>
               <div className="text-right"><div className="font-mono text-[8px] uppercase tracking-[.16em] text-slate-500">Threat</div><div className="font-mono text-xs font-bold text-orange-300" data-testid="text-behavior">{hud.behavior}</div></div>
             </div>
             <div className="hud-bottom">
               {state === 'BOSS' && <div className="mb-3"><div className="mb-1 flex justify-between font-mono text-[9px] uppercase tracking-[.12em] text-orange-200"><span>Enemy core · {hud.phase}</span><span data-testid="text-boss-health">{hud.bossHealth} / {hud.bossMaxHealth}</span></div><div className="boss-health"><div style={{ width: `${hud.bossMaxHealth ? hud.bossHealth / hud.bossMaxHealth * 100 : 0}%` }} /></div></div>}
-              <div className="flex items-end justify-between"><div><div className="mb-1 font-mono text-[8px] uppercase tracking-[.16em] text-slate-500">Hull integrity</div><div className={`font-mono text-2xl font-bold ${hud.health <= 25 ? 'text-red-300' : hud.health <= 50 ? 'text-orange-300' : 'text-green-300'}`} data-testid="status-health">{hud.health} <span className="text-xs font-normal text-slate-500">/ {PLAYER_MAX_HEALTH}</span></div></div><div className="flex items-center gap-2 font-mono text-[9px] uppercase tracking-[.14em] text-cyan-300/60"><Gamepad2 className="h-3 w-3" /> Pointer control</div></div>
+              <div className="flex items-end justify-between"><div><div className="mb-1 font-mono text-[8px] uppercase tracking-[.16em] text-slate-500">Hull integrity</div><div className={`font-mono text-2xl font-bold ${hud.health <= 25 ? 'text-red-300' : hud.health <= 50 ? 'text-orange-300' : 'text-green-300'}`} data-testid="status-health">{hud.health} <span className="text-xs font-normal text-slate-500">/ {PLAYER_MAX_HEALTH}</span></div></div><div className="flex items-center gap-2 font-mono text-[9px] uppercase tracking-[.14em] text-cyan-300/60"><Gamepad2 className="h-3 w-3" /> Drag joystick to steer</div></div>
             </div>
-            {state === 'COUNTDOWN' && <div className="state-overlay" data-testid="overlay-countdown"><div><p className="font-mono text-[10px] uppercase tracking-[.28em] text-cyan-300">Get ready</p><div className="mt-2 text-8xl font-extrabold text-cyan-200" data-testid="text-countdown">{countdown}</div><p className="mt-1 font-mono text-[10px] uppercase tracking-[.18em] text-slate-500">Drag to steer · weapons armed</p></div></div>}
+            {state === 'COUNTDOWN' && <div className="state-overlay" data-testid="overlay-countdown"><div><p className="font-mono text-[10px] uppercase tracking-[.28em] text-cyan-300">Get ready</p><div className="mt-2 text-8xl font-extrabold text-cyan-200" data-testid="text-countdown">{countdown}</div><p className="mt-1 font-mono text-[10px] uppercase tracking-[.18em] text-slate-500">Press + drag to steer · weapons auto-fire</p></div></div>}
             {state === 'BOSS_INTRO' && <div className="state-overlay" data-testid="overlay-boss-intro"><div className="overlay-card"><div className="phase-ring"><span className="font-mono text-lg text-orange-300">BOSS</span></div><p className="font-mono text-[10px] uppercase tracking-[.3em] text-orange-300">Stage clear</p><h2 className="mt-3 text-4xl font-extrabold tracking-[.08em] text-slate-100">THE SIGNAL WAKES</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Three phases. One last track.</p></div></div>}
             {state === 'GAME_OVER' && <div className="state-overlay" data-testid="overlay-game-over"><div className="overlay-card"><p className="font-mono text-[10px] uppercase tracking-[.28em] text-red-300">Flight terminated</p><h2 className="mt-3 text-5xl font-extrabold tracking-[.08em] text-red-200">SYSTEM DOWN</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Final score {hud.score}. Tap replay to re-enter the mix.</p><button onClick={beginCountdown} className="action-button mt-7 inline-flex items-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-game-over"><RotateCcw className="h-3.5 w-3.5" /> Replay mission</button></div></div>}
             {state === 'VICTORY' && <div className="state-overlay" data-testid="overlay-victory"><div className="overlay-card"><p className="font-mono text-[10px] uppercase tracking-[.28em] text-green-300">Signal captured</p><h2 className="mt-3 text-5xl font-extrabold tracking-[.08em] text-green-200">VICTORY</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Boss core collapsed. Final score {hud.score}.</p><button onClick={beginCountdown} className="action-button mt-7 inline-flex items-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-victory"><RotateCcw className="h-3.5 w-3.5" /> Run it back</button></div></div>}
