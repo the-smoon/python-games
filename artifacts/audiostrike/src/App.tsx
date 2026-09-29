@@ -346,7 +346,7 @@ function Home() {
   const [analysisMessage, setAnalysisMessage] = useState('Waiting for stage track');
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [countdown, setCountdown] = useState(3);
-  const [hud, setHud] = useState({ score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1 });
+  const [hud, setHud] = useState({ score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1, stageSecondsLeft: STAGE_LEVEL_SECONDS });
 
   const syncState = useCallback((next: GameState) => {
     gameRef.current.state = next;
@@ -429,7 +429,7 @@ function Home() {
     game.countdown = 3; game.countdownTimer = 58; game.currentBehavior = 'SCANNING';
     joystickRef.current = neutralJoystick();
     setCountdown(3);
-    setHud({ score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1 });
+    setHud({ score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1, stageSecondsLeft: STAGE_LEVEL_SECONDS });
     syncState('COUNTDOWN');
   }, [syncState]);
 
@@ -560,6 +560,7 @@ function Home() {
         return;
       }
       if (game.state !== 'PLAYING' && game.state !== 'BOSS') return;
+      let stageSecondsLeft = 0;
       const player = game.player;
       const joystick = joystickRef.current;
       const targetVx = joystick.dx * PLAYER_MAX_SPEED;
@@ -594,6 +595,7 @@ function Home() {
       if (game.state === 'PLAYING') {
         const live = readReactiveTrack(game.stageReactive);
         const songTime = getGameTime();
+         stageSecondsLeft = Math.ceil(clamp(STAGE_LEVEL_SECONDS - songTime, 0, STAGE_LEVEL_SECONDS));
          const progress = clamp(songTime / STAGE_LEVEL_SECONDS, 0, 1);
         game.spawnCooldown -= delta;
         game.currentBehavior = chooseBehavior(live);
@@ -731,7 +733,7 @@ function Home() {
       game.enemyBullets = game.enemyBullets.filter((bullet) => bullet.alive);
       for (const particle of game.particles) { particle.x += particle.vx * delta * .06; particle.y += particle.vy * delta * .06; particle.vy += .09 * delta; particle.life -= delta; }
       game.particles = game.particles.filter((particle) => particle.life > 0);
-      setHud({ score: game.score, health: player.health, behavior: game.currentBehavior || 'SCANNING', phase: game.boss?.phase ?? '', bossHealth: game.boss?.health ?? 0, bossMaxHealth: game.boss?.maxHealth ?? 1 });
+       setHud({ score: game.score, health: player.health, behavior: game.currentBehavior || 'SCANNING', phase: game.boss?.phase ?? '', bossHealth: game.boss?.health ?? 0, bossMaxHealth: game.boss?.maxHealth ?? 1, stageSecondsLeft });
     };
     const draw = () => {
       const game = gameRef.current;
@@ -868,6 +870,7 @@ function Home() {
             <canvas ref={canvasRef} className="game-canvas" onPointerDown={onJoystickDown} onPointerMove={onJoystickMove} onPointerUp={onJoystickRelease} onPointerCancel={onJoystickRelease} onLostPointerCapture={onJoystickRelease} data-testid="canvas-game" aria-label="AudioStrike game field. Press and drag to steer with a joystick." />
             <div className="hud-top">
               <div className="hud-chip"><div className="font-mono text-[8px] uppercase tracking-[.16em] text-slate-500">Score</div><div className="font-mono text-sm font-bold text-cyan-200" data-testid="text-score">{String(hud.score).padStart(6, '0')}</div></div>
+              {state === 'PLAYING' && <div className="hud-stage-timer font-mono" role="timer" aria-label={`Boss arrives in ${hud.stageSecondsLeft} seconds`} data-testid="text-stage-time"><div className="text-[8px] uppercase tracking-[.12em] text-slate-400">Boss in</div><div className="text-sm font-bold tabular-nums text-cyan-200">{hud.stageSecondsLeft}s</div></div>}
               <div className="text-right"><div className="font-mono text-[8px] uppercase tracking-[.16em] text-slate-500">Threat</div><div className="font-mono text-xs font-bold text-orange-300" data-testid="text-behavior">{hud.behavior}</div></div>
             </div>
             <div className="hud-bottom">

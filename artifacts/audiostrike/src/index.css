@@ -247,6 +247,14 @@
   background: rgba(7,8,15,.74);
 }
 
+.hud-stage-timer {
+  padding: 5px 8px;
+  min-width: 76px;
+  text-align: center;
+  background: rgba(7,8,15,.74);
+  border-bottom: 2px solid #00e5ff;
+}
+
 .hud-bottom {
   position: absolute;
   left: 12px;
@@ -357,5 +365,10 @@
   .hud-chip {
     min-width: 66px;
     padding: 4px 6px;
+  }
+
+  .hud-stage-timer {
+    min-width: 64px;
+    padding: 4px;
   }
 }
