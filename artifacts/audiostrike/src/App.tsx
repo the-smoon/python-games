@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Crosshair, FileAudio, Gamepad2, Headphones, RotateCcw, Shield, Volume2, Zap } from 'lucide-react';
 import { advanceBossDeath, advanceProjectiles, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, moveBoss, playerShotHitsTarget, spawnPressure, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS } from './gameRules';
-import { getControllerStatus, mapGamepadInput, neutralControllerVector } from './gamepadControls';
+import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
 
 type GameState = 'UPLOAD' | 'ANALYZING' | 'COUNTDOWN' | 'PLAYING' | 'STAGE_EXIT' | 'BOSS_INTRO' | 'BOSS' | 'GAME_OVER' | 'VICTORY';
 type Behavior = 'PATROL' | 'ZIGZAG' | 'FORMATION' | 'SWARM' | 'DIVE' | 'SHOOTER' | 'TANK';
@@ -542,10 +542,10 @@ function Home() {
   useEffect(() => {
     const updateControllerStatus = () => {
       const apiAvailable = typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function';
-      let gamepad: Gamepad | null = null;
+      let gamepad: ReturnType<typeof selectActiveGamepad> = null;
       if (apiAvailable) {
         try {
-          gamepad = Array.from(navigator.getGamepads()).find((candidate) => candidate?.connected) ?? null;
+          gamepad = selectActiveGamepad(Array.from(navigator.getGamepads()));
         } catch {
           gamepad = null;
         }
@@ -691,7 +691,7 @@ function Home() {
       let controllerInput = neutralControllerVector();
       if (typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function') {
         try {
-          const gamepad = Array.from(navigator.getGamepads()).find((candidate) => candidate?.connected);
+          const gamepad = selectActiveGamepad(Array.from(navigator.getGamepads()));
           if (gamepad) controllerInput = mapGamepadInput(gamepad);
         } catch {
           controllerInput = neutralControllerVector();

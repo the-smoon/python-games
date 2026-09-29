@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getControllerStatus, mapGamepadInput } from '../src/gamepadControls.ts';
+import { getControllerStatus, mapGamepadInput, selectActiveGamepad } from '../src/gamepadControls.ts';
 
 function gamepad({ axes = [0, 0], pressedButtons = [] } = {}) {
   const buttons = Array.from({ length: 17 }, (_, index) => ({
     pressed: pressedButtons.includes(index),
     value: pressedButtons.includes(index) ? 1 : 0,
   }));
-  return { axes, buttons };
+  return { id: 'DualSense', mapping: 'standard', connected: true, axes, buttons };
 }
 
 test('left stick applies a deadzone and preserves analog direction', () => {
@@ -31,6 +31,15 @@ test('D-pad steering uses standard Gamepad API button positions', () => {
 test('status distinguishes unsupported browsers, no controller, and DualSense', () => {
   assert.match(getControllerStatus(null, false), /unavailable/);
   assert.match(getControllerStatus(null, true), /No controller detected/);
-  assert.match(getControllerStatus({ id: 'Wireless Controller (Vendor: 054c Product: 0ce6)' }, true), /DualSense connected/);
-  assert.match(getControllerStatus({ id: 'Generic Gamepad' }, true), /Controller connected/);
+  assert.match(getControllerStatus({ ...gamepad(), id: 'Wireless Controller (Vendor: 054c Product: 0ce6)' }, true), /DualSense detected/);
+  assert.match(getControllerStatus({ ...gamepad(), id: 'Generic Gamepad' }, true), /Controller detected/);
+  assert.match(getControllerStatus({ ...gamepad({ axes: [0.7, 0] }) }, true), /stick 0.70, 0.00/);
+});
+
+test('prefers a connected controller that is actively providing movement input', () => {
+  const idle = gamepad();
+  const moving = gamepad({ axes: [-0.8, 0] });
+  assert.equal(selectActiveGamepad([idle, moving]), moving);
+  assert.equal(selectActiveGamepad([null, idle]), idle);
+  assert.equal(selectActiveGamepad([null]), null);
 });
