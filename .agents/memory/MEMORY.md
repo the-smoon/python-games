@@ -1,2 +1,3 @@
 - [AudioStrike preview routing](audiostrike-preview-routing.md) — browser game must use a managed root web artifact for reliable Replit and mobile preview access.
 - [Canvas game loop lifecycle](audiostrike-preview-routing.md) — start animation effects after conditional game canvas mounts, not only on initial upload screen.
+- [Portrait-first gameplay](audiostrike-portrait-first.md) — prioritize Pixel 9 portrait legibility and keep the player visible through damage feedback.

@@ -196,14 +196,13 @@
   min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 58px 12px 12px;
+  padding: 12px;
 }
 
 .game-frame {
   position: relative;
-  width: min(100%, 960px);
-  aspect-ratio: 4 / 3;
-  max-height: calc(100dvh - 70px);
+  width: min(100%, 420px, calc((100dvh - 24px) * .466667));
+  aspect-ratio: 7 / 15;
   border: 1px solid rgba(0,229,255,.34);
   box-shadow: 0 0 0 1px rgba(0,229,255,.07), 0 20px 90px rgba(0,0,0,.55), inset 0 0 45px rgba(0,229,255,.04);
   background: #07080f;
@@ -346,12 +345,15 @@
 
 @media (max-width: 640px) {
   .game-shell {
-    padding: 46px 0 0;
+    padding: 0;
   }
 
   .game-frame {
     width: 100vw;
-    max-height: calc(100dvh - 46px);
+    height: 100dvh;
+    aspect-ratio: auto;
+    border-top: 0;
+    border-bottom: 0;
     border-left: 0;
     border-right: 0;
   }
@@ -360,6 +362,14 @@
   .hud-bottom {
     left: 8px;
     right: 8px;
+  }
+
+  .hud-top {
+    top: max(12px, env(safe-area-inset-top));
+  }
+
+  .hud-bottom {
+    bottom: max(14px, env(safe-area-inset-bottom));
   }
 
   .hud-chip {

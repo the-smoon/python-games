@@ -42,8 +42,8 @@ type EnemyBulletEntity = { x: number; y: number; vx: number; vy: number; damage:
 type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string };
 type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; shape: EnemyShape; projectile: ProjectileKind; pattern: BossFirePattern; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; phaseFrame: number; vx: number; fireTimer: number; dyingTimer: number };
 
-const W = 800;
-const H = 600;
+const W = 420;
+const H = 900;
 const PLAYER_MAX_HEALTH = 100;
 const PLAYER_BULLET_SPEED = 48;
 const PLAYER_FIRE_INTERVAL = 8;
@@ -573,9 +573,10 @@ function Home() {
         player.vy += changeY / distance * velocityStep;
       }
       player.x = clamp(player.x + player.vx * delta, 22, W - 22);
-      player.y = clamp(player.y + player.vy * delta, 28, H - 28);
+      const bottomLimit = game.state === 'BOSS' ? H - 150 : H - 100;
+      player.y = clamp(player.y + player.vy * delta, 90, bottomLimit);
       if ((player.x === 22 && player.vx < 0) || (player.x === W - 22 && player.vx > 0)) player.vx = 0;
-      if ((player.y === 28 && player.vy < 0) || (player.y === H - 28 && player.vy > 0)) player.vy = 0;
+      if ((player.y === 90 && player.vy < 0) || (player.y === bottomLimit && player.vy > 0)) player.vy = 0;
       player.frame += 1;
       player.invincible = Math.max(0, player.invincible - delta);
       player.fireTimer -= delta;
@@ -755,7 +756,16 @@ function Home() {
          ctx.globalAlpha = 1;
        }
       const showPlayer = game.state === 'PLAYING' || game.state === 'STAGE_EXIT' || game.state === 'BOSS' || game.state === 'COUNTDOWN';
-      drawPlayer(ctx, game.player.x, game.player.y, game.player.frame, !(game.player.invincible > 0 && Math.floor(game.player.invincible / 5) % 2 === 1) && showPlayer);
+       drawPlayer(ctx, game.player.x, game.player.y, game.player.frame, showPlayer);
+       if (showPlayer && game.player.invincible > 0) {
+         ctx.save();
+         ctx.strokeStyle = `rgba(0, 255, 200, ${.45 + .22 * Math.sin(game.frame * .24)})`;
+         ctx.lineWidth = 2;
+         ctx.beginPath();
+         ctx.ellipse(game.player.x, game.player.y, 25, 33, 0, 0, Math.PI * 2);
+         ctx.stroke();
+         ctx.restore();
+       }
        if (game.state === 'PLAYING' || game.state === 'BOSS') drawJoystick(ctx, joystickRef.current);
     };
     const loop = (now: number) => {

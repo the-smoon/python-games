@@ -36,7 +36,7 @@ export function moveBoss(
 ) {
   if (boss.phase === 'PHASE1') {
     const orbit = boss.phaseFrame * .017 + Math.sin(boss.phaseFrame * .04) * live.high * .2;
-    boss.x = width / 2 + Math.sin(orbit) * (230 + live.low * 40);
+    boss.x = width / 2 + Math.sin(orbit) * Math.min(230 + live.low * 40, width / 2 - boss.radius - 20);
     boss.y = 132 + Math.cos(orbit) * (32 + live.mid * 22);
   } else if (boss.phase === 'PHASE2') {
     boss.x += boss.vx * (3.8 + live.high * 2.4) * delta;
