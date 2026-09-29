@@ -274,6 +274,21 @@
   text-align: right;
 }
 
+.controller-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 4px 7px;
+  color: #a5f3fc;
+  background: rgba(7, 8, 15, .78);
+  border: 1px solid rgba(0, 229, 255, .2);
+  font: 8px 'Space Mono', monospace;
+  line-height: 1.4;
+  text-align: center;
+}
+
 .audio-alert {
   position: absolute;
   z-index: 5;

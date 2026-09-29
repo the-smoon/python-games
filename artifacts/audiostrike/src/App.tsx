@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Crosshair, FileAudio, Gamepad2, Headphones, RotateCcw, Shield, Volume2, Zap } from 'lucide-react';
 import { advanceBossDeath, advanceProjectiles, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, moveBoss, playerShotHitsTarget, spawnPressure, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS } from './gameRules';
+import { getControllerStatus, mapGamepadInput, neutralControllerVector } from './gamepadControls';
 
 type GameState = 'UPLOAD' | 'ANALYZING' | 'COUNTDOWN' | 'PLAYING' | 'STAGE_EXIT' | 'BOSS_INTRO' | 'BOSS' | 'GAME_OVER' | 'VICTORY';
 type Behavior = 'PATROL' | 'ZIGZAG' | 'FORMATION' | 'SWARM' | 'DIVE' | 'SHOOTER' | 'TANK';
@@ -415,6 +416,8 @@ function Home() {
   const [countdown, setCountdown] = useState(3);
   const [hud, setHud] = useState({ score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1, stageSecondsLeft: STAGE_LEVEL_SECONDS });
   const [audioError, setAudioError] = useState('');
+  const [controllerStatus, setControllerStatus] = useState('Checking for controller…');
+  const controllerStatusRef = useRef('Checking for controller…');
 
   const syncState = useCallback((next: GameState) => {
     gameRef.current.state = next;
@@ -534,6 +537,34 @@ function Home() {
     stageInput.addEventListener('change', onStage);
     bossInput.addEventListener('change', onBoss);
     return () => { stageInput.removeEventListener('change', onStage); bossInput.removeEventListener('change', onBoss); };
+  }, []);
+
+  useEffect(() => {
+    const updateControllerStatus = () => {
+      const apiAvailable = typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function';
+      let gamepad: Gamepad | null = null;
+      if (apiAvailable) {
+        try {
+          gamepad = Array.from(navigator.getGamepads()).find((candidate) => candidate?.connected) ?? null;
+        } catch {
+          gamepad = null;
+        }
+      }
+      const nextStatus = getControllerStatus(gamepad, apiAvailable);
+      if (nextStatus !== controllerStatusRef.current) {
+        controllerStatusRef.current = nextStatus;
+        setControllerStatus(nextStatus);
+      }
+    };
+    window.addEventListener('gamepadconnected', updateControllerStatus);
+    window.addEventListener('gamepaddisconnected', updateControllerStatus);
+    const poll = window.setInterval(updateControllerStatus, 350);
+    updateControllerStatus();
+    return () => {
+      window.clearInterval(poll);
+      window.removeEventListener('gamepadconnected', updateControllerStatus);
+      window.removeEventListener('gamepaddisconnected', updateControllerStatus);
+    };
   }, []);
 
   useEffect(() => {
@@ -657,6 +688,18 @@ function Home() {
       let stageSecondsLeft = 0;
       const player = game.player;
       let joystick = joystickRef.current;
+      let controllerInput = neutralControllerVector();
+      if (typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function') {
+        try {
+          const gamepad = Array.from(navigator.getGamepads()).find((candidate) => candidate?.connected);
+          if (gamepad) controllerInput = mapGamepadInput(gamepad);
+        } catch {
+          controllerInput = neutralControllerVector();
+        }
+      }
+      const gamepadActive = Math.hypot(controllerInput.x, controllerInput.y) > 0.01;
+      if (gamepadActive) joystick = { ...joystick, dx: controllerInput.x, dy: controllerInput.y };
+      const isSteering = gamepadActive || joystick.pointerId !== null;
       if (![player.x, player.y, player.vx, player.vy, joystick.dx, joystick.dy].every(Number.isFinite)) {
         player.x = W / 2; player.y = H / 2; player.vx = 0; player.vy = 0;
         joystick = joystickRef.current = neutralJoystick();
@@ -666,7 +709,7 @@ function Home() {
       const changeX = targetVx - player.vx;
       const changeY = targetVy - player.vy;
       const distance = Math.hypot(changeX, changeY);
-      const velocityStep = (joystick.pointerId === null ? PLAYER_DECELERATION : PLAYER_ACCELERATION) * delta;
+      const velocityStep = (isSteering ? PLAYER_ACCELERATION : PLAYER_DECELERATION) * delta;
       if (distance <= velocityStep) {
         player.vx = targetVx; player.vy = targetVy;
       } else {
@@ -973,17 +1016,18 @@ function Home() {
                   </label>
                 </div>
                 <button onClick={startAnalysis} disabled={!canStart} className="action-button mt-5 flex w-full items-center justify-center gap-3 rounded-xl border border-cyan-300/50 bg-cyan-300/10 py-4 font-mono text-xs font-bold uppercase tracking-[.2em] text-cyan-200 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/50 disabled:text-slate-600" data-testid="button-analyze"><Crosshair className="h-4 w-4" /> Analyze and play</button>
-                <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-slate-600"><Volume2 className="h-3 w-3" /> MP3 · WAV · OGG · FLAC · M4A · AAC</div>
+            <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-slate-600"><Volume2 className="h-3 w-3" /> MP3 · WAV · OGG · FLAC · M4A · AAC</div>
+                <p className="controller-status mt-2" data-testid="controller-status" aria-live="polite">{controllerStatus}</p>
               </>
             )}
-            <div className="mt-10 grid grid-cols-3 gap-2 text-center font-mono text-[9px] uppercase tracking-[.12em] text-slate-600"><span className="border-t border-slate-800 pt-3">Press + drag joystick to steer</span><span className="border-t border-slate-800 pt-3">Auto-fire</span><span className="border-t border-slate-800 pt-3">Three phases</span></div>
+            <div className="mt-10 grid grid-cols-3 gap-2 text-center font-mono text-[9px] uppercase tracking-[.12em] text-slate-600"><span className="border-t border-slate-800 pt-3">Touch, left stick, or D-pad to steer</span><span className="border-t border-slate-800 pt-3">Auto-fire</span><span className="border-t border-slate-800 pt-3">Three phases</span></div>
           </div>
         </section>
       )}
       {isGame && (
         <section className="game-shell" data-testid="panel-game">
           <div className="game-frame">
-            <canvas ref={canvasRef} className="game-canvas" onPointerDown={onJoystickDown} onPointerMove={onJoystickMove} onPointerUp={onJoystickRelease} onPointerCancel={onJoystickRelease} onLostPointerCapture={onJoystickRelease} data-testid="canvas-game" aria-label="AudioStrike game field. Press and drag to steer with a joystick." />
+            <canvas ref={canvasRef} className="game-canvas" onPointerDown={onJoystickDown} onPointerMove={onJoystickMove} onPointerUp={onJoystickRelease} onPointerCancel={onJoystickRelease} onLostPointerCapture={onJoystickRelease} data-testid="canvas-game" aria-label="AudioStrike game field. Steer with touch or a game controller; weapons fire automatically." />
             <div className="hud-top">
               <div className="hud-chip"><div className="font-mono text-[8px] uppercase tracking-[.16em] text-slate-500">Score</div><div className="font-mono text-sm font-bold text-cyan-200" data-testid="text-score">{String(hud.score).padStart(6, '0')}</div></div>
               {state === 'PLAYING' && <div className="hud-stage-timer font-mono" role="timer" aria-label={`Boss arrives in ${hud.stageSecondsLeft} seconds`} data-testid="text-stage-time"><div className="text-[8px] uppercase tracking-[.12em] text-slate-400">Boss in</div><div className="text-sm font-bold tabular-nums text-cyan-200">{hud.stageSecondsLeft}s</div></div>}
@@ -991,10 +1035,11 @@ function Home() {
             </div>
             <div className="hud-bottom">
               {state === 'BOSS' && <div className="mb-3"><div className="mb-1 flex justify-between font-mono text-[9px] uppercase tracking-[.12em] text-orange-200"><span>Enemy core · {hud.phase}</span><span data-testid="text-boss-health">{hud.bossHealth} / {hud.bossMaxHealth}</span></div><div className="boss-health"><div style={{ width: `${hud.bossMaxHealth ? hud.bossHealth / hud.bossMaxHealth * 100 : 0}%` }} /></div></div>}
-              <div className="flex items-end justify-between gap-2"><div className="hull-status"><div className="mb-1 font-mono text-[8px] uppercase tracking-[.16em] text-slate-400">Hull integrity</div><div className={`whitespace-nowrap font-mono text-2xl font-bold ${hud.health <= 25 ? 'text-red-300' : hud.health <= 50 ? 'text-orange-300' : 'text-green-300'}`} data-testid="status-health">{hud.health} <span className="text-xs font-normal text-slate-400">/ {PLAYER_MAX_HEALTH}</span></div></div><div className="steering-hint flex items-center gap-2 font-mono text-[9px] uppercase tracking-[.14em] text-cyan-300/60"><Gamepad2 className="h-3 w-3" /> Drag joystick to steer</div></div>
+              <p className="controller-status mb-2" data-testid="controller-status" aria-live="polite"><Gamepad2 className="h-3 w-3 shrink-0" />{controllerStatus}</p>
+              <div className="flex items-end justify-between gap-2"><div className="hull-status"><div className="mb-1 font-mono text-[8px] uppercase tracking-[.16em] text-slate-400">Hull integrity</div><div className={`whitespace-nowrap font-mono text-2xl font-bold ${hud.health <= 25 ? 'text-red-300' : hud.health <= 50 ? 'text-orange-300' : 'text-green-300'}`} data-testid="status-health">{hud.health} <span className="text-xs font-normal text-slate-400">/ {PLAYER_MAX_HEALTH}</span></div></div><div className="steering-hint flex items-center gap-2 font-mono text-[9px] uppercase tracking-[.14em] text-cyan-300/60"><Gamepad2 className="h-3 w-3" /> Touch, stick, or D-pad</div></div>
             </div>
             {audioError && <div className="audio-alert" role="alert"><span>{audioError}</span><button type="button" onClick={retryAudio} className="rounded border border-orange-300 px-2 py-1 font-bold text-orange-200">Retry audio</button></div>}
-            {state === 'COUNTDOWN' && <div className="state-overlay" data-testid="overlay-countdown"><div><p className="font-mono text-[10px] uppercase tracking-[.28em] text-cyan-300">Get ready</p><div className="mt-2 text-8xl font-extrabold text-cyan-200" data-testid="text-countdown">{countdown}</div><p className="mt-1 font-mono text-[10px] uppercase tracking-[.18em] text-slate-500">Press + drag to steer · weapons auto-fire</p></div></div>}
+            {state === 'COUNTDOWN' && <div className="state-overlay" data-testid="overlay-countdown"><div><p className="font-mono text-[10px] uppercase tracking-[.28em] text-cyan-300">Get ready</p><div className="mt-2 text-8xl font-extrabold text-cyan-200" data-testid="text-countdown">{countdown}</div><p className="mt-1 font-mono text-[10px] uppercase tracking-[.18em] text-slate-500">Touch, left stick, or D-pad · weapons auto-fire</p></div></div>}
             {state === 'BOSS_INTRO' && <div className="state-overlay" data-testid="overlay-boss-intro"><div className="overlay-card"><div className="phase-ring"><span className="font-mono text-lg text-orange-300">BOSS</span></div><p className="font-mono text-[10px] uppercase tracking-[.3em] text-orange-300">Stage clear</p><h2 className="mt-3 text-4xl font-extrabold tracking-[.08em] text-slate-100">THE SIGNAL WAKES</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Three phases. One last track.</p></div></div>}
             {state === 'GAME_OVER' && <div className="state-overlay" data-testid="overlay-game-over"><div className="overlay-card"><p className="font-mono text-[10px] uppercase tracking-[.28em] text-red-300">Flight terminated</p><h2 className="mt-3 text-5xl font-extrabold tracking-[.08em] text-red-200">SYSTEM DOWN</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Final score {hud.score}. Tap replay to re-enter the mix.</p><button onClick={beginCountdown} className="action-button mt-7 inline-flex items-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-game-over"><RotateCcw className="h-3.5 w-3.5" /> Replay mission</button></div></div>}
             {state === 'VICTORY' && <div className="state-overlay" data-testid="overlay-victory"><div className="overlay-card"><p className="font-mono text-[10px] uppercase tracking-[.28em] text-green-300">Signal captured</p><h2 className="mt-3 text-5xl font-extrabold tracking-[.08em] text-green-200">VICTORY</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Boss core collapsed. Final score {hud.score}.</p><button onClick={beginCountdown} className="action-button mt-7 inline-flex items-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-victory"><RotateCcw className="h-3.5 w-3.5" /> Run it back</button></div></div>}
