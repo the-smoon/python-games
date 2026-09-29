@@ -35,11 +35,11 @@ export function getControllerStatus(
   apiAvailable: boolean,
 ): string {
   if (!apiAvailable) return 'Controller input is unavailable in this browser';
-  if (!gamepad) return 'No controller detected · connect it, then press any button';
+  if (!gamepad) return 'No controller detected · connect and press a button';
   const id = gamepad.id.toLowerCase();
   const isDualSense = id.includes('dualsense') || id.includes('dual sense')
     || /vendor:\s*054c.*product:\s*(?:0ce6|0df2)/i.test(gamepad.id);
   return isDualSense
-    ? 'DualSense connected · left stick / D-pad to steer'
-    : 'Controller connected · left stick / D-pad to steer';
+    ? 'DualSense connected · stick / D-pad to steer'
+    : 'Controller connected · stick / D-pad to steer';
 }

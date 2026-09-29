@@ -23,7 +23,9 @@ test('D-pad steering uses standard Gamepad API button positions', () => {
   const upRight = mapGamepadInput(gamepad({ pressedButtons: [12, 15] }));
   assert.ok(Math.abs(upRight.x - Math.SQRT1_2) < 0.0001);
   assert.ok(Math.abs(upRight.y + Math.SQRT1_2) < 0.0001);
-  assert.deepEqual(mapGamepadInput(gamepad({ pressedButtons: [13, 14] })), { x: -Math.SQRT1_2, y: Math.SQRT1_2 });
+  const downLeft = mapGamepadInput(gamepad({ pressedButtons: [13, 14] }));
+  assert.ok(Math.abs(downLeft.x + Math.SQRT1_2) < 0.0001);
+  assert.ok(Math.abs(downLeft.y - Math.SQRT1_2) < 0.0001);
 });
 
 test('status distinguishes unsupported browsers, no controller, and DualSense', () => {
