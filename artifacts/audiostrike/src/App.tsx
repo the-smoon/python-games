@@ -39,7 +39,7 @@ type EnemyEntity = {
 type BulletEntity = { x: number; y: number; vy: number; alive: boolean };
 type EnemyBulletEntity = { x: number; y: number; vx: number; vy: number; damage: number; alive: boolean; kind?: ProjectileKind; radius?: number; spin?: number };
 type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string };
-type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; shape: EnemyShape; projectile: ProjectileKind; pattern: BossFirePattern; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; vx: number; fireTimer: number; dyingTimer: number };
+type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; shape: EnemyShape; projectile: ProjectileKind; pattern: BossFirePattern; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; phaseFrame: number; vx: number; fireTimer: number; dyingTimer: number };
 
 const W = 800;
 const H = 600;
@@ -48,9 +48,8 @@ const PLAYER_BULLET_SPEED = 48;
 const PLAYER_FIRE_INTERVAL = 8;
 const BULLET_TIME_SCALE = 0.22;
 const ENEMY_MOTION_TIME_SCALE = 0.18;
-const ENEMY_BULLET_TIME_SCALE = 0.19;
-const STAGE_LEVEL_SECONDS = 60;
-const SPAWN_COOLDOWN_MULTIPLIER = 1.7;
+const ENEMY_BULLET_TIME_SCALE = 0.26;
+const STAGE_LEVEL_SECONDS = 30;
 const PLAYER_MAX_SPEED = 5.5;
 const PLAYER_ACCELERATION = .32;
 const PLAYER_DECELERATION = .45;
@@ -399,6 +398,7 @@ function Home() {
       bossAudioRef.current = new Audio(URL.createObjectURL(bossFile));
       stageAudioRef.current.preload = 'auto';
       bossAudioRef.current.preload = 'auto';
+       bossAudioRef.current.loop = true;
       stageAudioRef.current.volume = .72;
       bossAudioRef.current.volume = .72;
       game.audioContext = audioContext;
@@ -414,6 +414,7 @@ function Home() {
       resetAudio();
       stageAudioRef.current = new Audio(URL.createObjectURL(stageFile));
       bossAudioRef.current = new Audio(URL.createObjectURL(bossFile));
+       bossAudioRef.current.loop = true;
       beginCountdown();
     }
   }, [bossFile, resetAudio, stageFile, syncState]);
@@ -492,13 +493,13 @@ function Home() {
     const beginBoss = () => {
       const game = gameRef.current;
       const features = game.bossFeatures ?? { duration: 28 };
-      const hp = Math.max(165, Math.round(180 + Math.min(55, features.duration)));
+       const hp = Math.round(2100 + Math.min(500, features.duration * 8));
       game.player.x = W / 2;
       game.player.y = H / 2;
       game.player.vx = 0; game.player.vy = 0;
       joystickRef.current = neutralJoystick();
       game.player.invincible = 0;
-      game.boss = { x: W / 2, y: -70, radius: 55, health: hp, maxHealth: hp, shape: 'RING', projectile: 'ORB', pattern: 'TRACK', phase: 'INTRO', frame: 0, vx: 1.8, fireTimer: 0, dyingTimer: 0 };
+       game.boss = { x: W / 2, y: -70, radius: 55, health: hp, maxHealth: hp, shape: 'RING', projectile: 'ORB', pattern: 'TRACK', phase: 'INTRO', frame: 0, phaseFrame: 0, vx: 1, fireTimer: 0, dyingTimer: 0 };
       game.bullets = []; game.enemyBullets = []; game.beatIndex = 0;
       game.state = 'BOSS'; game.bossStart = performance.now();
       resetReactiveTrack(game.bossReactive);
@@ -593,36 +594,39 @@ function Home() {
       if (game.state === 'PLAYING') {
         const live = readReactiveTrack(game.stageReactive);
         const songTime = getGameTime();
+         const progress = clamp(songTime / STAGE_LEVEL_SECONDS, 0, 1);
         game.spawnCooldown -= delta;
         game.currentBehavior = chooseBehavior(live);
-        if (live.pulse && game.spawnCooldown <= 0 && game.enemies.length < 20) {
-          const behavior = chooseBehavior(live);
-          const intensity = clamp(live.rms * .65 + live.onset * .35, .12, 1);
-          const count = Math.min(5, 1 + Math.floor(intensity * 3) + (live.onset > .8 ? 1 : 0));
+         if (!game.stageDone && songTime >= STAGE_LEVEL_SECONDS) {
+           game.stageDone = true;
+           game.stageExitTimer = 0;
+           for (const enemy of game.enemies) enemy.exiting = true;
+           game.enemyBullets = [];
+           stageAudioRef.current?.pause();
+           joystickRef.current = neutralJoystick();
+           player.vx = 0; player.vy = 0;
+           game.state = 'STAGE_EXIT';
+           syncState('STAGE_EXIT');
+           return;
+         }
+         // Music can trigger a wave slightly ahead of schedule; elapsed time
+         // guarantees the pressure still rises through sparse or quiet passages.
+         if ((game.spawnCooldown <= 0 || (live.pulse && game.spawnCooldown <= 12)) && game.enemies.length < 22) {
+           const behavior = chooseBehavior(live);
+           const intensity = clamp(live.rms * .65 + live.onset * .35, 0, 1);
+           const count = Math.min(5, 1 + Math.floor(progress * 2.5 + intensity * 1.5 + (live.onset > .8 ? 1 : 0)));
           const spawnSerial = game.spawnIndex;
           game.spawnIndex += 1;
-          for (let enemyIndex = 0; enemyIndex < count && game.enemies.length < 20; enemyIndex += 1) {
+           for (let enemyIndex = 0; enemyIndex < count && game.enemies.length < 22; enemyIndex += 1) {
             const variation = (Math.sin((spawnSerial + enemyIndex) * 2.17 + live.centroid * 8) + 1) / 2;
             const radius = clamp(9 + live.low * 22 + variation * 13 + live.high * 5, 9, 48);
             const x = behavior === 'FORMATION' ? (W / (count + 1)) * (enemyIndex + 1) : random(radius + 18, W - radius - 18);
-            const health = 1 + Math.round(live.low * 5);
+             const health = 1 + Math.round(live.low * 4 + progress * 4);
             const shape = chooseEnemyShape(live, spawnSerial + enemyIndex);
             const projectile = chooseProjectile(live, behavior);
-            game.enemies.push({ x, y: -radius - 12, radius, health, maxHealth: health, speed: 2.4 + live.high * 6.2, behavior, fireRate: live.mid > .4 ? Math.round(150 - live.mid * 55) : 0, fireTimer: randomInt(24, 120), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, shape, projectile, exiting: false, alive: true });
+             game.enemies.push({ x, y: -radius - 12, radius, health, maxHealth: health, speed: 2.4 + live.high * 6.2 + progress * 2.4, behavior, fireRate: live.mid > .4 || progress > .55 ? Math.round(150 - live.mid * 55 - progress * 40) : 0, fireTimer: randomInt(24, 100), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, shape, projectile, exiting: false, alive: true });
           }
-          game.spawnCooldown = clamp((58 - intensity * 22 - live.high * 5) * SPAWN_COOLDOWN_MULTIPLIER, 48, 100);
-        }
-        if (!game.stageDone && songTime >= STAGE_LEVEL_SECONDS) {
-          game.stageDone = true;
-          game.stageExitTimer = 0;
-          for (const enemy of game.enemies) enemy.exiting = true;
-          game.enemyBullets = [];
-          stageAudioRef.current?.pause();
-          joystickRef.current = neutralJoystick();
-          player.vx = 0; player.vy = 0;
-          game.state = 'STAGE_EXIT';
-          syncState('STAGE_EXIT');
-          return;
+           game.spawnCooldown = clamp(84 - progress * 51 - intensity * 15 - live.high * 5, 24, 84);
         }
         for (const enemy of game.enemies) {
           enemy.frame += delta;
@@ -651,32 +655,42 @@ function Home() {
       } else if (game.boss) {
         const boss = game.boss;
         boss.frame += delta;
-        if (boss.phase === 'INTRO') { boss.y += (100 - boss.y) * .03 * delta; if (boss.y >= 98) boss.phase = boss.health / boss.maxHealth > .66 ? 'PHASE1' : 'PHASE2'; }
+         if (boss.phase === 'INTRO') { boss.y += (100 - boss.y) * .03 * delta; if (boss.y >= 98) { boss.phase = boss.health / boss.maxHealth > .66 ? 'PHASE1' : 'PHASE2'; boss.phaseFrame = 0; } }
         else if (boss.phase === 'DYING') { boss.dyingTimer += delta; if (game.frame % 4 === 0) spawnParticles(game.particles, boss.x + random(-boss.radius, boss.radius), boss.y + random(-boss.radius, boss.radius), ['#ff4444', '#ff8800', '#ffff00', '#ffffff'][randomInt(0, 3)], 12, 2, 9); if (boss.dyingTimer >= 150) { boss.phase = 'DYING'; victory(); } }
         else {
           const live = readReactiveTrack(game.bossReactive);
           const healthRatio = boss.health / boss.maxHealth;
-          boss.phase = healthRatio > .66 ? 'PHASE1' : healthRatio > .33 ? 'PHASE2' : 'PHASE3';
+           const nextPhase = healthRatio > .66 ? 'PHASE1' : healthRatio > .33 ? 'PHASE2' : 'PHASE3';
+           if (boss.phase !== nextPhase) {
+             boss.phase = nextPhase;
+             boss.phaseFrame = 0;
+             if (nextPhase === 'PHASE2') boss.vx = boss.x > W / 2 ? -1 : 1;
+           }
+           boss.phaseFrame += delta;
           boss.shape = chooseBossShape(live);
           boss.projectile = chooseProjectile(live, 'BOSS');
           boss.pattern = chooseBossFirePattern(live, boss.frame);
           game.currentBehavior = live.pulse ? 'BOSS PULSE' : 'BOSS TRACKING';
           boss.fireTimer -= delta;
-          if (live.pulse && live.high > .5) boss.vx *= -1;
           if (boss.phase === 'PHASE1') {
-            boss.x += boss.vx * (1.2 + live.high * 3.6) * delta;
-            boss.y = 105 + Math.sin(boss.frame * (.012 + live.mid * .02)) * (18 + live.low * 42);
-            if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1;
+             // Wide elliptical orbit: audio controls its angular speed and depth.
+             const orbit = boss.phaseFrame * .017 + Math.sin(boss.phaseFrame * .04) * live.high * .2;
+             boss.x = W / 2 + Math.sin(orbit) * (230 + live.low * 40);
+             boss.y = 132 + Math.cos(orbit) * (32 + live.mid * 22);
           } else if (boss.phase === 'PHASE2') {
-            boss.x += boss.vx * (2 + live.high * 5) * delta;
-            boss.y = 110 + Math.sin(boss.frame * (.015 + live.mid * .025)) * (25 + live.low * 55);
-            if (boss.x < boss.radius || boss.x > W - boss.radius) boss.vx *= -1;
+             // Faster edge-to-edge sweeps with short vertical dives.
+             boss.x += boss.vx * (3.8 + live.high * 2.4) * delta;
+             if (boss.x <= boss.radius + 20 || boss.x >= W - boss.radius - 20) {
+               boss.x = clamp(boss.x, boss.radius + 20, W - boss.radius - 20);
+               boss.vx *= -1;
+             }
+             boss.y = 132 + Math.sin(boss.phaseFrame * (.045 + live.mid * .02)) * (42 + live.low * 25);
           } else {
             boss.x += (player.x - boss.x) * (.012 + live.mid * .012) * delta;
             boss.y += (Math.min(player.y - 120, 200) - boss.y) * (.008 + live.low * .012) * delta;
           }
           const fireThreshold = boss.phase === 'PHASE1' ? .72 : boss.phase === 'PHASE2' ? .68 : .62;
-          if (boss.fireTimer <= 0 && (live.pulse || live.rms > fireThreshold)) {
+           if (boss.fireTimer <= 0 && (live.pulse || live.rms > fireThreshold || boss.fireTimer <= -48)) {
             if (boss.pattern === 'TRACK') {
               boss.fireTimer = clamp(54 - live.onset * 16 - live.mid * 8, 24, 54);
               const dx = player.x - boss.x, dy = player.y - boss.y, distance = Math.hypot(dx, dy) || 1;
@@ -703,16 +717,6 @@ function Home() {
       for (const bullet of game.bullets) { bullet.y += bullet.vy * delta * BULLET_TIME_SCALE; if (bullet.y < -20) bullet.alive = false; }
       for (const bullet of game.enemyBullets) { bullet.x += bullet.vx * delta * ENEMY_BULLET_TIME_SCALE; bullet.y += bullet.vy * delta * ENEMY_BULLET_TIME_SCALE; if (bullet.y > H + 20 || bullet.y < -20 || bullet.x < -20 || bullet.x > W + 20) bullet.alive = false; }
       for (const bullet of game.bullets) {
-        if (!bullet.alive) continue;
-        for (const enemyBullet of game.enemyBullets) {
-          if (!enemyBullet.alive) continue;
-           if (Math.hypot(bullet.x - enemyBullet.x, bullet.y - enemyBullet.y) <= (enemyBullet.radius ?? 4) + 5) {
-            bullet.alive = false;
-            enemyBullet.alive = false;
-            spawnParticles(game.particles, enemyBullet.x, enemyBullet.y, '#00ffff', 5, 1, 4);
-            break;
-          }
-        }
         if (!bullet.alive) continue;
         for (const enemy of game.enemies) {
           if (!enemy.alive) continue;
