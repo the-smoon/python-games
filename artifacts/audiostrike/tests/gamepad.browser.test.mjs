@@ -128,6 +128,34 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
       assert.match(await page.getByTestId('controller-status').innerText(), new RegExp(statusText));
     }
 
+    async function assertReconnectSteers(phase) {
+      const start = await page.evaluate(() => window.__ship?.x);
+      assert.ok(Number.isFinite(start), `${phase}: ship must be drawn before reconnecting`);
+      await page.evaluate((reconnected) => {
+        window.__pads = [reconnected, null];
+        window.dispatchEvent(new Event('gamepadconnected'));
+      }, pad(0, { x: -0.9, buttons: [14] }));
+      await page.waitForFunction(
+        (initialX) => Number.isFinite(window.__ship?.x) && initialX - window.__ship.x > 24,
+        start,
+        { timeout: 2500 },
+      );
+      await page.waitForFunction(
+        () => {
+          const status = document.querySelector('[data-testid="controller-status"]')?.textContent ?? '';
+          return status.includes('Controller detected') && status.includes('stick -0.90, 0.00') && status.includes('D-pad ←');
+        },
+        null,
+        { timeout: 2000 },
+      );
+      assert.ok(start - await page.evaluate(() => window.__ship.x) > 24, `${phase}: renewed controller input must steer left`);
+      assert.match(
+        await page.getByTestId('controller-status').innerText(),
+        /Controller detected.*stick -0\.90, 0\.00.*D-pad ←/,
+        `${phase}: status must reflect the reconnected controller's input`,
+      );
+    }
+
     for (const phase of ['PLAYING', 'BOSS']) {
       if (phase === 'BOSS') {
         // Skip the stage while still running the real stage-exit,
@@ -145,6 +173,7 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
       await assertReleaseSettles(phase, 'neutral input', [pad(0), null], -1, 'stick 0.00, 0.00');
       await moves(phase, 'left stick right before disconnecting', [pad(0, { x: 0.9 }), null], 1);
       await assertReleaseSettles(phase, 'controller disconnect', [pad(0, { connected: false }), null], 1, 'No controller detected');
+      await assertReconnectSteers(phase);
     }
   } finally {
     await browser.close();
