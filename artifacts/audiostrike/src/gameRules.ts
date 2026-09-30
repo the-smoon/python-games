@@ -1,4 +1,4 @@
-export const STAGE_LEVEL_SECONDS = 30;
+export const STAGE_LEVEL_SECONDS = 60;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
