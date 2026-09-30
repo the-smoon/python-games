@@ -3,20 +3,21 @@ import test from 'node:test';
 import {
   advanceBossDeath, advanceProjectiles, bossPhase, configureGameplayAudio,
   damageBoss, enemyShotHitsPlayer, moveBoss, playerShotHitsTarget,
-  spawnPressure, stageProgress, STAGE_LEVEL_SECONDS,
+  spawnPressure, stageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS,
 } from '../src/gameRules.ts';
 
-test('stage runs for 60 seconds regardless of track duration, then exits', () => {
-  assert.equal(STAGE_LEVEL_SECONDS, 60);
-  for (const songTime of [0, 12, 59.999]) assert.equal(stageProgress(songTime).finished, false);
-  assert.deepEqual(stageProgress(60), { secondsLeft: 0, progress: 1, finished: true });
-  assert.equal(stageProgress(65).finished, true);
-  assert.equal(stageProgress(12).secondsLeft, 48);
+test('stage runs for 30 seconds regardless of track duration, then exits', () => {
+  assert.equal(STAGE_LEVEL_SECONDS, 30);
+  assert.equal(BOSS_ARRIVAL_SECONDS, 5);
+  for (const songTime of [0, 12, 29.999]) assert.equal(stageProgress(songTime).finished, false);
+  assert.deepEqual(stageProgress(30), { secondsLeft: 0, progress: 1, finished: true });
+  assert.equal(stageProgress(35).finished, true);
+  assert.equal(stageProgress(12).secondsLeft, 18);
 });
 
 test('quiet-track waves become larger and more frequent from early to late stage', () => {
   const early = spawnPressure(stageProgress(0).progress, 0, 0, 0);
-  const late = spawnPressure(stageProgress(59).progress, 0, 0, 0);
+  const late = spawnPressure(stageProgress(29).progress, 0, 0, 0);
   assert.equal(early.count, 1);
   assert.equal(early.cooldown, 84);
   assert.ok(late.count >= 3, `late quiet wave should have at least three enemies: ${late.count}`);
@@ -66,7 +67,7 @@ test('opposing projectiles cross without cancelling; only targets receive hits',
   assert.equal(enemyShotHitsPlayer({ x: 416, y: 300, radius: 6 }, { x: 400, y: 300 }, 20, 32), true);
 });
 
-test('final boss hit enters death sequence and normal victory completes after delay', () => {
+test('final boss hit enters death sequence before the next level begins', () => {
   const boss = { health: 2, maxHealth: 2, phase: 'PHASE3', dyingTimer: 0 };
   assert.equal(damageBoss(boss), true);
   assert.equal(boss.health, 1);

@@ -4,3 +4,4 @@
 - [AudioStrike transition safety](audiostrike-transition-safety.md) — non-finite player coordinates can silently strand timed transitions; keep exit fallbacks independent of position.
 - [Browser game clock tests](audiostrike-browser-clock-tests.md) — advance time with the browser clock, not by overriding performance.now, when testing state transitions.
 - [Bazzite Chrome Flatpak controllers](audiostrike-bazzite-controller.md) — read-only udev access restored Chrome's controller enumeration; verify browser detection before changing game code.
+- [Audio-driven attack selection](audiostrike-audio-pattern-selection.md) — deterministic variation should break close ties, not override strong musical signals.

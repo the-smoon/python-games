@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Crosshair, FileAudio, Gamepad2, Headphones, RotateCcw, Shield, Volume2, Zap } from 'lucide-react';
-import { advanceBossDeath, advanceProjectiles, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, moveBoss, playerShotHitsTarget, spawnPressure, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS } from './gameRules';
+import { advanceBossDeath, advanceProjectiles, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
+import { audioIntensity, bossHealth, chooseAttack, chooseMotion, generateForm, spawnProfile, type AttackPattern, type FormProfile, type MotionPattern } from './encounterRules';
 
-type GameState = 'UPLOAD' | 'ANALYZING' | 'COUNTDOWN' | 'PLAYING' | 'STAGE_EXIT' | 'BOSS_INTRO' | 'BOSS' | 'GAME_OVER' | 'VICTORY';
+type GameState = 'UPLOAD' | 'ANALYZING' | 'COUNTDOWN' | 'PLAYING' | 'BOSS_INTRO' | 'BOSS' | 'GAME_OVER';
 type Behavior = 'PATROL' | 'ZIGZAG' | 'FORMATION' | 'SWARM' | 'DIVE' | 'SHOOTER' | 'TANK';
 type FeatureSet = {
   duration: number;
@@ -17,10 +18,10 @@ type LiveFeatures = {
   centroid: number;
   flatness: number;
   pulse: boolean;
+  tempo: number;
 };
 type EnemyShape = 'CIRCLE' | 'DIAMOND' | 'TRIANGLE' | 'HEX' | 'RING';
 type ProjectileKind = 'ORB' | 'BOLT' | 'SHARD' | 'RING';
-type BossFirePattern = 'TRACK' | 'BURST' | 'RADIAL';
 type AudioReactiveTrack = {
   element: HTMLAudioElement;
   analyser: AnalyserNode;
@@ -37,12 +38,13 @@ type EnemyEntity = {
   x: number; y: number; radius: number; health: number; maxHealth: number; speed: number;
   behavior: Behavior; fireRate: number; fireTimer: number; frame: number; zigDir: number;
   formX: number; formY: number; diving: boolean; dvx: number; dvy: number; shape: EnemyShape; projectile: ProjectileKind; exiting: boolean; alive: boolean;
+  form: FormProfile; motion: MotionPattern; pattern: AttackPattern; subBoss: boolean;
 };
 type BulletEntity = { x: number; y: number; vy: number; alive: boolean };
 type EnemyBulletEntity = { x: number; y: number; vx: number; vy: number; damage: number; alive: boolean; kind?: ProjectileKind; radius?: number; spin?: number };
 type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string };
 type DebrisEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; angle: number; spin: number };
-type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; shape: EnemyShape; projectile: ProjectileKind; pattern: BossFirePattern; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; phaseFrame: number; vx: number; fireTimer: number; dyingTimer: number };
+type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; shape: EnemyShape; projectile: ProjectileKind; pattern: AttackPattern; motion: MotionPattern; form: FormProfile; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; phaseFrame: number; vx: number; fireTimer: number; dyingTimer: number; subBossTimer: number; revision: number };
 
 const W = 420;
 const H = 900;
@@ -82,7 +84,7 @@ async function inspectAudio(file: File, progress: (value: number) => void): Prom
   return features;
 }
 
-const blankLiveFeatures = (): LiveFeatures => ({ rms: 0, onset: 0, low: 0, mid: 0, high: 0, centroid: 0, flatness: 0, pulse: false });
+const blankLiveFeatures = (): LiveFeatures => ({ rms: 0, onset: 0, low: 0, mid: 0, high: 0, centroid: 0, flatness: 0, pulse: false, tempo: 0 });
 
 function createReactiveTrack(context: AudioContext, element: HTMLAudioElement): AudioReactiveTrack {
   const source = context.createMediaElementSource(element);
@@ -159,10 +161,16 @@ function readReactiveTrack(track: AudioReactiveTrack | null): LiveFeatures {
   const onset = clamp((normalizedFlux - track.energyBaseline) * 7 + normalizedFlux * .28, 0, 1);
   track.energyBaseline = track.energyBaseline * .94 + normalizedFlux * .06;
   const now = track.element.currentTime;
+  if (now < track.lastTime) track.lastPulseAt = -10;
   const pulse = track.lastTime >= 0 && onset > .38 && now - track.lastPulseAt > .2;
+  let tempo = track.lastFeatures.tempo * .995;
+  if (pulse && track.lastPulseAt >= 0) {
+    const interval = now - track.lastPulseAt;
+    if (interval >= .2 && interval <= 2) tempo = tempo * .68 + clamp(60 / interval, 0, 180) * .32;
+  }
   if (pulse) track.lastPulseAt = now;
   track.lastTime = now;
-  track.lastFeatures = { rms, onset, low, mid, high, centroid, flatness, pulse };
+  track.lastFeatures = { rms, onset, low, mid, high, centroid, flatness, pulse, tempo };
   return track.lastFeatures;
 }
 
@@ -195,19 +203,54 @@ function chooseBossShape(features: LiveFeatures): EnemyShape {
   return 'RING';
 }
 
-function chooseBossFirePattern(features: LiveFeatures, serial: number): BossFirePattern {
-  const variation = (Math.sin(serial * .071 + features.centroid * 8) + 1) / 2;
-  const burstSignal = features.high * .52 + features.onset * .32 + features.mid * .12 + variation * .16 + (features.pulse ? .12 : 0);
-  const radialSignal = features.low * .55 + features.rms * .25 + (1 - features.centroid) * .12 + variation * .16;
-  if (burstSignal > .7 && features.high > .34) return 'BURST';
-  if (radialSignal > .68 && features.low > .34) return 'RADIAL';
-  return 'TRACK';
-}
-
 function createEnemyProjectile(x: number, y: number, vx: number, vy: number, damage: number, kind: ProjectileKind): EnemyBulletEntity {
   const speedScale: Record<ProjectileKind, number> = { ORB: 1, BOLT: 1.12, SHARD: 1.28, RING: .78 };
   const radius: Record<ProjectileKind, number> = { ORB: 4, BOLT: 3, SHARD: 4, RING: 6 };
   return { x, y, vx: vx * speedScale[kind], vy: vy * speedScale[kind], damage, alive: true, kind, radius: radius[kind], spin: Math.atan2(vy, vx) };
+}
+
+function firePattern(
+  bullets: EnemyBulletEntity[], x: number, y: number, player: { x: number; y: number },
+  pattern: AttackPattern, kind: ProjectileKind, speed: number, damage: number, serial: number,
+) {
+  if (bullets.length >= 260) return;
+  const aim = Math.atan2(player.y - y, player.x - x);
+  const shot = (angle: number, speedScale = 1) => {
+    if (bullets.length < 260) bullets.push(createEnemyProjectile(x, y, Math.cos(angle) * speed * speedScale, Math.sin(angle) * speed * speedScale, damage, kind));
+  };
+  if (pattern === 'TRACK') shot(aim);
+  else if (pattern === 'BURST') for (let i = -2; i <= 2; i += 1) shot(aim + i * .15);
+  else if (pattern === 'RADIAL') for (let i = 0; i < 10; i += 1) shot(i * Math.PI / 5 + serial * .08, .8);
+  else if (pattern === 'SPIRAL') for (let i = 0; i < 4; i += 1) shot(aim + i * Math.PI / 2 + serial * .13, .9);
+  else for (let i = -2; i <= 2; i += 1) shot(Math.PI / 2 + i * .24 + Math.sin(serial * .15) * .12);
+}
+
+function moveDynamicBoss(boss: BossEntity, player: { x: number; y: number }, live: LiveFeatures, delta: number) {
+  const energy = audioIntensity(live);
+  const speed = 1 + energy * 1.6 + live.tempo / 240;
+  const time = boss.phaseFrame * .015 * speed;
+  if (boss.motion === 'ORBIT') {
+    const targetX = W / 2 + Math.sin(time) * (W / 2 - boss.radius - 24);
+    const targetY = 142 + Math.cos(time * 1.3) * (22 + live.mid * 30);
+    boss.x += (targetX - boss.x) * Math.min(.08 * delta, .2);
+    boss.y += (targetY - boss.y) * Math.min(.08 * delta, .2);
+  } else if (boss.motion === 'SWEEP') {
+    boss.x += boss.vx * (3 + speed * 2.5) * delta;
+    boss.y = 135 + Math.sin(time * .8) * 38;
+    if (boss.x < boss.radius + 18 || boss.x > W - boss.radius - 18) boss.vx *= -1;
+  } else if (boss.motion === 'CHASE') {
+    boss.x += (player.x - boss.x) * (.008 + energy * .018) * delta;
+    boss.y += (clamp(player.y - 280, 110, 225) - boss.y) * .02 * delta;
+  } else if (boss.motion === 'DASH') {
+    boss.x += (player.x - boss.x) * (.009 + (Math.sin(time * 2) > .72 ? .1 : 0)) * delta;
+    boss.y = 142 + Math.sin(time) * 40;
+  } else {
+    boss.x += boss.vx * (3 + speed * 1.8) * delta;
+    boss.y = 138 + Math.sin(time * 2.3) * 55;
+    if (boss.x < boss.radius + 18 || boss.x > W - boss.radius - 18) boss.vx *= -1;
+  }
+  boss.x = clamp(boss.x, boss.radius + 15, W - boss.radius - 15);
+  boss.y = clamp(boss.y, boss.radius + 20, 245);
 }
 
 function shapePath(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, shape: EnemyShape) {
@@ -229,19 +272,35 @@ function shapePath(ctx: CanvasRenderingContext2D, x: number, y: number, radius: 
   ctx.closePath();
 }
 
-function drawShape(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, shape: EnemyShape, color: string) {
+function drawGeneratedForm(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, form: FormProfile, color: string, frame: number) {
+  const points = Math.max(24, form.sides * 4);
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(form.rotation + Math.sin(frame * .013) * .08);
   ctx.fillStyle = color;
-  shapePath(ctx, x, y, radius, shape);
-  ctx.fill();
-  if (shape === 'RING') {
-    ctx.globalAlpha = .72;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(2, radius * .16);
-    ctx.beginPath();
-    ctx.arc(x, y, radius * .58, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+  ctx.strokeStyle = '#d6fff9';
+  ctx.lineWidth = Math.max(1.5, radius * .045);
+  ctx.beginPath();
+  for (let point = 0; point <= points; point += 1) {
+    const angle = point / points * Math.PI * 2;
+    const faceted = Math.cos(angle * form.sides) * .065;
+    const lobed = Math.sin(angle * form.lobes) * .09;
+    const spike = form.spikes ? Math.pow(Math.max(0, Math.cos(angle * form.spikes)), 8) * .18 : 0;
+    const r = radius * (0.8 + faceted + lobed + spike);
+    if (point === 0) ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
+    else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
   }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#0b1930';
+  ctx.beginPath();
+  ctx.arc(0, 0, radius * form.innerRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(2, radius * .08);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawEnemyDamage(ctx: CanvasRenderingContext2D, enemy: EnemyEntity) {
@@ -405,7 +464,8 @@ function Home() {
   const stageAudioRef = useRef<HTMLAudioElement | null>(null);
   const bossAudioRef = useRef<HTMLAudioElement | null>(null);
   const joystickRef = useRef<Joystick>(neutralJoystick());
-  const gameRef = useRef({ state: 'UPLOAD' as GameState, stageFeatures: null as FeatureSet | null, bossFeatures: null as FeatureSet | null, audioContext: null as AudioContext | null, stageReactive: null as AudioReactiveTrack | null, bossReactive: null as AudioReactiveTrack | null, player: { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [] as EnemyEntity[], bullets: [] as BulletEntity[], enemyBullets: [] as EnemyBulletEntity[], particles: [] as ParticleEntity[], debris: [] as DebrisEntity[], boss: null as BossEntity | null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, stageExitTimer: 0, introTimer: 0, countdown: 3, countdownTimer: 0, victoryTimer: 0, currentBehavior: '' });
+  const starsRef = useRef<{ x: number; y: number; size: number; brightness: number; speed: number }[]>([]);
+  const gameRef = useRef({ state: 'UPLOAD' as GameState, level: 1, stageFeatures: null as FeatureSet | null, bossFeatures: null as FeatureSet | null, audioContext: null as AudioContext | null, stageReactive: null as AudioReactiveTrack | null, bossReactive: null as AudioReactiveTrack | null, player: { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [] as EnemyEntity[], bullets: [] as BulletEntity[], enemyBullets: [] as EnemyBulletEntity[], particles: [] as ParticleEntity[], debris: [] as DebrisEntity[], boss: null as BossEntity | null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, bossArrivalAt: 0, introTimer: 0, countdown: 3, countdownTimer: 0, currentBehavior: '' });
   const [state, setState] = useState<GameState>('UPLOAD');
   const [stageFile, setStageFile] = useState<File | null>(null);
   const [bossFile, setBossFile] = useState<File | null>(null);
@@ -414,7 +474,7 @@ function Home() {
   const [analysisMessage, setAnalysisMessage] = useState('Waiting for stage track');
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [countdown, setCountdown] = useState(3);
-  const [hud, setHud] = useState({ score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1, stageSecondsLeft: STAGE_LEVEL_SECONDS });
+  const [hud, setHud] = useState({ level: 1, score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1, stageSecondsLeft: STAGE_LEVEL_SECONDS });
   const [audioError, setAudioError] = useState('');
   const [controllerStatus, setControllerStatus] = useState('Checking for controller…');
   const controllerStatusRef = useRef('Checking for controller…');
@@ -506,15 +566,16 @@ function Home() {
 
   const beginCountdown = useCallback(() => {
     const game = gameRef.current;
+    game.level = 1;
     game.player = { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 };
     game.enemies = []; game.bullets = []; game.enemyBullets = []; game.particles = []; game.debris = []; game.boss = null;
-      game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.spawnCooldown = 0; game.stageDone = false; game.stageExitTimer = 0; game.introTimer = 0;
+      game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.spawnCooldown = 0; game.stageDone = false; game.bossArrivalAt = 0; game.introTimer = 0;
     resetReactiveTrack(game.stageReactive);
     resetReactiveTrack(game.bossReactive);
     game.countdown = 3; game.countdownTimer = 58; game.currentBehavior = 'SCANNING';
     joystickRef.current = neutralJoystick();
     setCountdown(3);
-    setHud({ score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1, stageSecondsLeft: STAGE_LEVEL_SECONDS });
+    setHud({ level: 1, score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1, stageSecondsLeft: STAGE_LEVEL_SECONDS });
     setAudioError('');
     bossAudioRef.current?.pause();
     if (stageAudioRef.current) {
@@ -573,7 +634,8 @@ function Home() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     canvas.width = W; canvas.height = H;
-      const stars = Array.from({ length: 180 }, (_, index) => ({ x: random(0, W), y: random(0, H), size: 1, brightness: random(.28, .9), speed: .55 + (index % 4) * .22 }));
+      if (!starsRef.current.length) starsRef.current = Array.from({ length: 180 }, (_, index) => ({ x: random(0, W), y: random(0, H), size: 1, brightness: random(.28, .9), speed: .55 + (index % 4) * .22 }));
+      const stars = starsRef.current;
     let raf = 0;
     let last = performance.now();
     const getGameTime = () => {
@@ -601,10 +663,8 @@ function Home() {
     };
     const beginBossIntro = () => {
       const game = gameRef.current;
-      joystickRef.current = neutralJoystick();
-      game.player.vx = 0; game.player.vy = 0;
-      game.state = 'BOSS_INTRO'; game.introTimer = 180; game.enemies = []; game.enemyBullets = [];
-      stageAudioRef.current?.pause();
+      game.state = 'BOSS_INTRO'; game.bossArrivalAt = performance.now() + BOSS_ARRIVAL_SECONDS * 1000; game.introTimer = BOSS_ARRIVAL_SECONDS * 60; game.enemyBullets = [];
+      for (const enemy of game.enemies) { enemy.exiting = true; enemy.fireRate = 0; }
       setAudioError('');
       if (bossAudioRef.current) {
         bossAudioRef.current.currentTime = 0;
@@ -617,38 +677,72 @@ function Home() {
     const beginBoss = () => {
       const game = gameRef.current;
       const features = game.bossFeatures ?? { duration: 28 };
-       const hp = Math.round(2100 + Math.min(500, features.duration * 8));
-      game.player.x = W / 2;
-      game.player.y = H / 2;
-      game.player.vx = 0; game.player.vy = 0;
-      joystickRef.current = neutralJoystick();
-      game.player.invincible = 0;
-       game.boss = { x: W / 2, y: -70, radius: 55, health: hp, maxHealth: hp, shape: 'RING', projectile: 'ORB', pattern: 'TRACK', phase: 'INTRO', frame: 0, phaseFrame: 0, vx: 1, fireTimer: 0, dyingTimer: 0 };
-      game.bullets = []; game.enemyBullets = []; game.beatIndex = 0;
+      const live = readReactiveTrack(game.bossReactive);
+      const hp = bossHealth(features.duration, game.level);
+      game.player.y = clamp(game.player.y, 90, H - 150);
+      game.boss = { x: W / 2, y: -35, radius: 55, health: hp, maxHealth: hp, shape: chooseBossShape(live), projectile: chooseProjectile(live, 'BOSS'), pattern: chooseAttack(live, game.level), motion: chooseMotion(live, game.level), form: generateForm(live, game.level * 37), phase: 'INTRO', frame: 0, phaseFrame: 0, vx: 1, fireTimer: 0, dyingTimer: 0, subBossTimer: 0, revision: 0 };
+      game.enemies = []; game.bullets = []; game.enemyBullets = []; game.beatIndex = 0;
       game.state = 'BOSS'; game.bossStart = performance.now();
-      resetReactiveTrack(game.bossReactive);
+      stageAudioRef.current?.pause();
       if (bossAudioRef.current) bossAudioRef.current.volume = .72;
       resumeAudio();
       syncState('BOSS');
+    };
+    const spawnSubBoss = (live: LiveFeatures) => {
+      const game = gameRef.current;
+      const boss = game.boss;
+      if (!boss || game.enemies.filter((enemy) => enemy.subBoss && enemy.alive).length >= 3) return;
+      const serial = game.spawnIndex++ + game.level * 29;
+      const radius = 22 + live.low * 8;
+      const x = clamp(boss.x + (serial % 2 ? 1 : -1) * (boss.radius + 16), radius, W - radius);
+      const health = Math.round(clamp(12 + game.level * 3 + live.low * 8, 12, 65));
+      game.enemies.push({
+        x, y: boss.y, radius, health, maxHealth: health, speed: 3.5 + audioIntensity(live) * 4 + Math.min(3, game.level * .35),
+        behavior: 'SHOOTER', fireRate: clamp(85 - audioIntensity(live) * 40 - game.level * 2, 24, 90),
+        fireTimer: 38, frame: 0, zigDir: serial % 2 ? 1 : -1, formX: x, formY: boss.y,
+        diving: false, dvx: 0, dvy: 0, shape: chooseEnemyShape(live, serial),
+        projectile: chooseProjectile(live, 'BOSS'), form: generateForm(live, serial, 1.1),
+        motion: chooseMotion(live, serial), pattern: chooseAttack(live, serial),
+        subBoss: true, exiting: false, alive: true,
+      });
+    };
+    const clearHostilesOnBossDeath = () => {
+      const game = gameRef.current;
+      for (const enemy of game.enemies) {
+        if (enemy.subBoss) spawnParticles(game.particles, enemy.x, enemy.y, '#ffb347', 10, 2, 7);
+      }
+      game.enemies = [];
+      game.enemyBullets = [];
+    };
+    const beginNextLevel = () => {
+      const game = gameRef.current;
+      game.level += 1;
+      game.stageDone = false;
+      game.spawnCooldown = 0;
+      game.enemies = []; game.enemyBullets = []; game.bullets = []; game.boss = null;
+      game.player.vx = 0; game.player.vy = 0;
+      joystickRef.current = neutralJoystick();
+      bossAudioRef.current?.pause();
+      resetReactiveTrack(game.stageReactive);
+      if (stageAudioRef.current) {
+        stageAudioRef.current.currentTime = 0;
+        stageAudioRef.current.volume = .72;
+        resumeAudio();
+        playTrack(stageAudioRef.current, 'Stage track');
+      }
+      game.songStart = performance.now();
+      syncState('PLAYING');
+      setHud((previous) => ({ ...previous, level: game.level, stageSecondsLeft: STAGE_LEVEL_SECONDS, phase: '' }));
     };
     const gameOver = () => {
       joystickRef.current = neutralJoystick();
       stageAudioRef.current?.pause(); bossAudioRef.current?.pause();
       syncState('GAME_OVER');
     };
-    const victory = () => {
-      joystickRef.current = neutralJoystick();
-      bossAudioRef.current?.pause();
-      gameRef.current.victoryTimer = 360;
-      syncState('VICTORY');
-    };
     const update = (delta: number) => {
       const game = gameRef.current;
       game.frame += 1;
-      const backgroundScrolling = game.state === 'COUNTDOWN' || game.state === 'PLAYING' || game.state === 'BOSS' || game.state === 'VICTORY';
-      if (backgroundScrolling) {
-        for (const star of stars) { star.y += star.speed * delta * .35; if (star.y > H) { star.y = 0; star.x = random(0, W); } }
-      }
+       for (const star of stars) { star.y += star.speed * delta * .35; if (star.y > H) { star.y = 0; star.x = random(0, W); } }
       for (const particle of game.particles) { particle.x += particle.vx * delta * .06; particle.y += particle.vy * delta * .06; particle.vy += .07 * delta; particle.life -= delta; }
       game.particles = game.particles.filter((particle) => particle.life > 0);
       for (const chunk of game.debris) { chunk.x += chunk.vx * delta; chunk.y += chunk.vy * delta; chunk.vy += .045 * delta; chunk.angle += chunk.spin * delta; chunk.life -= delta; }
@@ -662,29 +756,14 @@ function Home() {
         }
         return;
       }
-      if (game.state === 'STAGE_EXIT') {
-        game.stageExitTimer += delta;
-        if (!Number.isFinite(game.player.y)) game.player.y = H / 2;
-        game.player.y += 8 * delta;
-        for (const enemy of game.enemies) enemy.y += (12 + enemy.speed * 2.2) * delta;
-        game.enemies = game.enemies.filter((enemy) => enemy.y < H + enemy.radius + 24);
-        if (game.stageExitTimer >= 42 && (game.player.y > H + 24 || game.stageExitTimer >= 150)) beginBossIntro();
-        return;
-      }
       if (game.state === 'BOSS_INTRO') {
-        game.introTimer -= delta;
-        const introProgress = clamp(1 - game.introTimer / 180, 0, 1);
-        if (stageAudioRef.current) stageAudioRef.current.volume = .72 * clamp(1 - introProgress * 1.35, 0, 1);
-        if (bossAudioRef.current) bossAudioRef.current.volume = .72 * clamp((introProgress - .12) / .72, 0, 1);
+        game.introTimer = Math.max(0, (game.bossArrivalAt - performance.now()) / 1000 * 60);
+        const introProgress = clamp(1 - game.introTimer / (BOSS_ARRIVAL_SECONDS * 60), 0, 1);
+        if (stageAudioRef.current) stageAudioRef.current.volume = .72 * (1 - introProgress);
+        if (bossAudioRef.current) bossAudioRef.current.volume = .72 * introProgress;
         if (game.introTimer <= 0) beginBoss();
-        return;
       }
-      if (game.state === 'VICTORY') {
-        game.victoryTimer -= delta;
-        if (game.frame % 8 === 0) spawnParticles(game.particles, random(90, W - 90), random(70, H - 230), ['#ff4444', '#ff8800', '#ffff44', '#44ff88', '#00ffff', '#cc44ff'][randomInt(0, 5)], 18, 2, 9);
-        return;
-      }
-      if (game.state !== 'PLAYING' && game.state !== 'BOSS') return;
+      if (game.state !== 'PLAYING' && game.state !== 'BOSS' && game.state !== 'BOSS_INTRO') return;
       let stageSecondsLeft = 0;
       const player = game.player;
       let joystick = joystickRef.current;
@@ -734,115 +813,143 @@ function Home() {
         );
         player.fireTimer = PLAYER_FIRE_INTERVAL;
       }
+      let live = blankLiveFeatures();
       if (game.state === 'PLAYING') {
-        const live = readReactiveTrack(game.stageReactive);
+        live = readReactiveTrack(game.stageReactive);
         const songTime = getGameTime();
-         const stage = getStageProgress(songTime);
-         stageSecondsLeft = stage.secondsLeft;
-         const progress = stage.progress;
+        const stage = getStageProgress(songTime);
+        stageSecondsLeft = stage.secondsLeft;
+        const progress = stage.progress;
         game.spawnCooldown -= delta;
         game.currentBehavior = chooseBehavior(live);
-          if (!game.stageDone && stage.finished) {
-           game.stageDone = true;
-           game.stageExitTimer = 0;
-           for (const enemy of game.enemies) enemy.exiting = true;
-           game.enemyBullets = [];
-           stageAudioRef.current?.pause();
-           joystickRef.current = neutralJoystick();
-           player.vx = 0; player.vy = 0;
-           game.state = 'STAGE_EXIT';
-           syncState('STAGE_EXIT');
-           return;
-         }
-         // Music can trigger a wave slightly ahead of schedule; elapsed time
-         // guarantees the pressure still rises through sparse or quiet passages.
-         if ((game.spawnCooldown <= 0 || (live.pulse && game.spawnCooldown <= 12)) && game.enemies.length < 22) {
-           const behavior = chooseBehavior(live);
-           const intensity = clamp(live.rms * .65 + live.onset * .35, 0, 1);
-            const pressure = spawnPressure(progress, intensity, live.onset, live.high);
-            const count = pressure.count;
+        if (!game.stageDone && stage.finished) {
+          game.stageDone = true;
+          beginBossIntro();
+          return;
+        }
+        const pressure = spawnProfile(live, game.level, progress);
+        if ((game.spawnCooldown <= 0 || (live.pulse && game.spawnCooldown <= 10)) && game.enemies.length < pressure.maxEnemies) {
+          const behavior = chooseBehavior(live);
+          const count = pressure.count;
           const spawnSerial = game.spawnIndex;
-          game.spawnIndex += 1;
-           for (let enemyIndex = 0; enemyIndex < count && game.enemies.length < 22; enemyIndex += 1) {
-            const variation = (Math.sin((spawnSerial + enemyIndex) * 2.17 + live.centroid * 8) + 1) / 2;
-            const radius = clamp(9 + live.low * 22 + variation * 13 + live.high * 5, 9, 48);
+          game.spawnIndex += count;
+          for (let enemyIndex = 0; enemyIndex < count && game.enemies.length < pressure.maxEnemies; enemyIndex += 1) {
+            const serial = spawnSerial + enemyIndex + game.level * 17;
+            const variation = (Math.sin(serial * 2.17 + live.centroid * 8) + 1) / 2;
+            const radius = clamp(9 + live.low * 17 + variation * 10 + live.high * 5, 9, 42);
             const x = behavior === 'FORMATION' ? (W / (count + 1)) * (enemyIndex + 1) : random(radius + 18, W - radius - 18);
-             const health = 1 + Math.round(live.low * 4 + progress * 4);
-            const shape = chooseEnemyShape(live, spawnSerial + enemyIndex);
+            const health = clamp(1 + Math.round(live.low * 3 + progress * 3 + (game.level - 1) * 1.2), 1, 22);
+            const shape = chooseEnemyShape(live, serial);
             const projectile = chooseProjectile(live, behavior);
-             game.enemies.push({ x, y: -radius - 12, radius, health, maxHealth: health, speed: 2.4 + live.high * 6.2 + progress * 2.4, behavior, fireRate: live.mid > .4 || progress > .55 ? Math.round(150 - live.mid * 55 - progress * 40) : 0, fireTimer: randomInt(24, 100), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, shape, projectile, exiting: false, alive: true });
+            const motion = chooseMotion(live, serial);
+            const pattern = chooseAttack(live, serial);
+            game.enemies.push({ x, y: -radius - 12, radius, health, maxHealth: health, speed: (2.4 + live.high * 6.2 + progress * 2.4) * pressure.speedScale, behavior, fireRate: clamp((112 - live.mid * 42) / pressure.fireScale, 28, 140), fireTimer: randomInt(20, 80), frame: 0, zigDir: Math.random() > .5 ? 1 : -1, formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, shape, projectile, form: generateForm(live, serial, .8), motion, pattern, subBoss: false, exiting: false, alive: true });
           }
-            game.spawnCooldown = pressure.cooldown;
+          game.spawnCooldown = pressure.cooldown;
         }
-        for (const enemy of game.enemies) {
-          enemy.frame += delta;
-           if (enemy.exiting) { enemy.fireRate = 0; enemy.y += (12 + enemy.speed * 2.2) * delta; }
-           else if (enemy.behavior === 'PATROL') { enemy.y += enemy.speed * delta * ENEMY_MOTION_TIME_SCALE; enemy.x += Math.sin(enemy.frame * .03) * .6; }
-          else if (enemy.behavior === 'ZIGZAG') { enemy.y += enemy.speed * .65 * delta * ENEMY_MOTION_TIME_SCALE; enemy.x += enemy.zigDir * enemy.speed * 1.6 * delta * ENEMY_MOTION_TIME_SCALE; if (enemy.x < enemy.radius || enemy.x > W - enemy.radius) enemy.zigDir *= -1; }
-          else if (enemy.behavior === 'FORMATION') { enemy.formY += enemy.speed * .4 * delta * ENEMY_MOTION_TIME_SCALE; enemy.y += (enemy.formY - enemy.y) * .08; enemy.x += (enemy.formX + Math.sin(enemy.frame * .022) * 15 - enemy.x) * .08; }
-          else if (enemy.behavior === 'SWARM') { const dx = player.x - enemy.x; const dy = player.y - enemy.y; const distance = Math.hypot(dx, dy) || 1; enemy.x += (dx / distance) * enemy.speed * .4 * delta * ENEMY_MOTION_TIME_SCALE + random(-1.5, 1.5); enemy.y += enemy.speed * .6 * delta * ENEMY_MOTION_TIME_SCALE + (dy / distance) * enemy.speed * .2 * delta * ENEMY_MOTION_TIME_SCALE; }
-          else if (enemy.behavior === 'DIVE') { if (!enemy.diving) { enemy.y += enemy.speed * .5 * delta * ENEMY_MOTION_TIME_SCALE; if (enemy.y > 100 && Math.random() < .022 * delta) { enemy.diving = true; const dx = player.x - enemy.x; const dy = player.y - enemy.y; const distance = Math.hypot(dx, dy) || 1; enemy.dvx = dx / distance * enemy.speed * 3.2; enemy.dvy = dy / distance * enemy.speed * 3.2; } } else { enemy.x += enemy.dvx * delta * ENEMY_MOTION_TIME_SCALE; enemy.y += enemy.dvy * delta * ENEMY_MOTION_TIME_SCALE; } }
-          else if (enemy.behavior === 'SHOOTER') { enemy.y += enemy.speed * .25 * delta * ENEMY_MOTION_TIME_SCALE; if (enemy.y > 80) enemy.y += (80 + (enemy.x / W) * 60 - enemy.y) * .03; enemy.x += Math.sin(enemy.frame * .026) * enemy.speed * .5; }
-          else { enemy.y += enemy.speed * .32 * delta * ENEMY_MOTION_TIME_SCALE; enemy.x += Math.sin(enemy.frame * .014) * enemy.speed * .3; }
-           if (!enemy.exiting && enemy.fireRate > 0 && enemy.behavior !== 'SWARM' && !enemy.diving) {
-            enemy.fireTimer -= delta;
-            if (enemy.fireTimer <= 0) {
-              enemy.fireTimer = enemy.fireRate;
-              const dx = player.x - enemy.x, dy = player.y - enemy.y, distance = Math.hypot(dx, dy) || 1;
-                if (enemy.behavior === 'SHOOTER') { const angle = Math.atan2(dy, dx); game.enemyBullets.push(createEnemyProjectile(enemy.x, enemy.y, Math.cos(angle) * 7.4, Math.sin(angle) * 7.4, 4, enemy.projectile)); }
-                else game.enemyBullets.push(createEnemyProjectile(enemy.x, enemy.y, dx / distance * 7.4, dy / distance * 7.4, enemy.behavior === 'TANK' ? 9 : 6, enemy.projectile));
-            }
-          }
-          if (enemy.y > H + 70 || enemy.x < -90 || enemy.x > W + 90) enemy.alive = false;
-            const enemyOnScreen = enemy.y + enemy.radius >= 0 && enemy.y - enemy.radius <= H;
-            if (!enemy.exiting && enemyOnScreen && enemyHitsPlayer(enemy, player)) { enemy.alive = false; spawnDeathDebris(game.debris, enemy.x, enemy.y, enemy.radius, COLORS[enemy.behavior]); const impactDamage = enemy.behavior === 'TANK' ? 25 : enemy.behavior === 'DIVE' ? 20 : enemy.behavior === 'SWARM' ? 10 : 14; if (player.invincible <= 0) { player.health = Math.max(0, player.health - impactDamage); player.invincible = 90; spawnParticles(game.particles, player.x, player.y, '#ff3333', 14); if (player.health <= 0) gameOver(); } }
-        }
-        game.enemies = game.enemies.filter((enemy) => enemy.alive);
-      } else if (game.boss) {
+      } else if (game.state === 'BOSS' && game.boss) {
         const boss = game.boss;
         boss.frame += delta;
-          if (boss.phase === 'INTRO') { boss.y += (100 - boss.y) * .03 * delta; if (boss.y >= 98) { boss.phase = bossPhase(boss.health, boss.maxHealth); boss.phaseFrame = 0; } }
-         else if (boss.phase === 'DYING') { const deathComplete = advanceBossDeath(boss, delta); if (game.frame % 4 === 0) spawnParticles(game.particles, boss.x + random(-boss.radius, boss.radius), boss.y + random(-boss.radius, boss.radius), ['#ff4444', '#ff8800', '#ffff00', '#ffffff'][randomInt(0, 3)], 12, 2, 9); if (deathComplete) victory(); }
-        else {
-          const live = readReactiveTrack(game.bossReactive);
-            const nextPhase = bossPhase(boss.health, boss.maxHealth);
-           if (boss.phase !== nextPhase) {
-             boss.phase = nextPhase;
-             boss.phaseFrame = 0;
-             if (nextPhase === 'PHASE2') boss.vx = boss.x > W / 2 ? -1 : 1;
-           }
-           boss.phaseFrame += delta;
-          boss.shape = chooseBossShape(live);
+        live = readReactiveTrack(game.bossReactive);
+        if (boss.phase === 'INTRO') {
+          boss.y += (120 - boss.y) * .035 * delta;
+          if (boss.y >= 117) { boss.phase = bossPhase(boss.health, boss.maxHealth); boss.phaseFrame = 0; boss.subBossTimer = 180; }
+        } else if (boss.phase === 'DYING') {
+          if (game.enemies.length || game.enemyBullets.length) clearHostilesOnBossDeath();
+          const deathComplete = advanceBossDeath(boss, delta);
+          if (game.frame % 4 === 0) spawnParticles(game.particles, boss.x + random(-boss.radius, boss.radius), boss.y + random(-boss.radius, boss.radius), ['#ff4444', '#ff8800', '#ffff00', '#ffffff'][randomInt(0, 3)], 12, 2, 9);
+          if (deathComplete) { beginNextLevel(); return; }
+        } else {
+          const nextPhase = bossPhase(boss.health, boss.maxHealth);
+          if (boss.phase !== nextPhase) {
+            boss.phase = nextPhase;
+            boss.phaseFrame = 0;
+            boss.revision += 1;
+            boss.vx = boss.x > W / 2 ? -1 : 1;
+            spawnSubBoss(live);
+          }
+          boss.phaseFrame += delta;
+          if ((boss.phaseFrame > 160 && live.pulse) || boss.phaseFrame > 260) {
+            boss.revision += 1;
+            boss.phaseFrame = 0;
+          }
+          if (boss.phaseFrame < delta * 2) {
+            const serial = boss.revision + game.level * 37;
+            boss.form = generateForm(live, serial);
+            boss.motion = chooseMotion(live, serial);
+            boss.pattern = chooseAttack(live, serial);
+            boss.shape = chooseBossShape(live);
+          }
           boss.projectile = chooseProjectile(live, 'BOSS');
-          boss.pattern = chooseBossFirePattern(live, boss.frame);
-          game.currentBehavior = live.pulse ? 'BOSS PULSE' : 'BOSS TRACKING';
-          boss.fireTimer -= delta;
-           moveBoss(boss, player, live, delta, W, H);
-          const fireThreshold = boss.phase === 'PHASE1' ? .72 : boss.phase === 'PHASE2' ? .68 : .62;
-           if (boss.fireTimer <= 0 && (live.pulse || live.rms > fireThreshold || boss.fireTimer <= -48)) {
-            if (boss.pattern === 'TRACK') {
-              boss.fireTimer = clamp(54 - live.onset * 16 - live.mid * 8, 24, 54);
-              const dx = player.x - boss.x, dy = player.y - boss.y, distance = Math.hypot(dx, dy) || 1;
-              game.enemyBullets.push(createEnemyProjectile(boss.x, boss.y, dx / distance * 8, dy / distance * 8, 8, boss.projectile));
-            } else if (boss.pattern === 'BURST') {
-              boss.fireTimer = clamp(45 - live.onset * 13 - live.mid * 7, 20, 45);
-              const base = Math.atan2(player.y - boss.y, player.x - boss.x);
-              const spreadCount = live.high > .72 ? 5 : 3;
-              for (let spread = 0; spread < spreadCount; spread += 1) {
-                const angle = base + (spread - (spreadCount - 1) / 2) * (.16 + live.high * .08);
-                game.enemyBullets.push(createEnemyProjectile(boss.x, boss.y, Math.cos(angle) * 8.4, Math.sin(angle) * 8.4, 5, boss.projectile));
-              }
-            } else {
-              boss.fireTimer = clamp(36 - live.onset * 10 - live.low * 7, 16, 36);
-              const rayCount = 8 + Math.round(live.high * 4);
-              for (let ray = 0; ray < rayCount; ray += 1) {
-                const angle = (ray / rayCount) * Math.PI * 2 + boss.frame * (.025 + live.high * .05);
-                game.enemyBullets.push(createEnemyProjectile(boss.x, boss.y, Math.cos(angle) * (7.4 + live.low * 1.2), Math.sin(angle) * (7.4 + live.low * 1.2), 3, boss.projectile));
-              }
-            }
+          game.currentBehavior = `BOSS ${boss.pattern}`;
+          boss.subBossTimer -= delta;
+          if (boss.subBossTimer <= 0 && (live.pulse || audioIntensity(live) > .55 || boss.subBossTimer <= -150)) {
+            spawnSubBoss(live);
+            boss.subBossTimer = clamp(680 - audioIntensity(live) * 350 - game.level * 15, 240, 680);
+          }
+          moveDynamicBoss(boss, player, live, delta);
+          boss.fireTimer -= delta * (1 + audioIntensity(live) * .45);
+          if (boss.fireTimer <= 0) {
+            firePattern(game.enemyBullets, boss.x, boss.y + boss.radius * .3, player, boss.pattern, boss.projectile, 7.4 + Math.min(2, game.level * .18), boss.pattern === 'TRACK' ? 8 : 4, game.frame);
+            boss.fireTimer = clamp(64 - audioIntensity(live) * 39 - live.tempo * .06 - game.level * 2, 17, 65);
+          }
+        }
+      } else if (game.state === 'BOSS_INTRO') {
+        live = readReactiveTrack(game.stageReactive);
+      }
+      for (const enemy of game.enemies) {
+        enemy.frame += delta;
+        const movement = enemy.speed * delta * ENEMY_MOTION_TIME_SCALE * (1 + audioIntensity(live) * .3);
+        if (enemy.exiting) {
+          enemy.fireRate = 0;
+          enemy.y += (12 + enemy.speed * 2.2) * delta;
+        } else if (enemy.motion === 'ORBIT') {
+          enemy.formY += movement * .65;
+          enemy.y += (enemy.formY + Math.cos(enemy.frame * .06) * 15 - enemy.y) * .08 * delta;
+          enemy.x += (enemy.formX + Math.sin(enemy.frame * .045) * (enemy.subBoss ? 75 : 30) - enemy.x) * .08 * delta;
+        } else if (enemy.motion === 'SWEEP') {
+          enemy.y += movement * .5;
+          enemy.x += enemy.zigDir * movement * 2.3;
+          if (enemy.x <= enemy.radius || enemy.x >= W - enemy.radius) enemy.zigDir *= -1;
+        } else if (enemy.motion === 'CHASE') {
+          enemy.y += movement * .55;
+          enemy.x += (player.x - enemy.x) * .018 * delta;
+        } else if (enemy.motion === 'DASH') {
+          if (!enemy.diving && enemy.y > 85 && (live.pulse || enemy.frame > 75)) {
+            enemy.diving = true;
+            const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+            enemy.dvx = Math.cos(angle) * enemy.speed * 2;
+            enemy.dvy = Math.sin(angle) * enemy.speed * 2;
+          }
+          if (enemy.diving) { enemy.x += enemy.dvx * delta * ENEMY_MOTION_TIME_SCALE; enemy.y += enemy.dvy * delta * ENEMY_MOTION_TIME_SCALE; }
+          else enemy.y += movement * .7;
+        } else {
+          enemy.y += movement * .7;
+          enemy.x += Math.sin(enemy.frame * .09) * movement * 1.5;
+        }
+        enemy.x = clamp(enemy.x, enemy.radius, W - enemy.radius);
+        if (enemy.subBoss && !enemy.exiting) enemy.y = clamp(enemy.y, enemy.radius + 40, 325);
+        if (!enemy.exiting && enemy.fireRate > 0) {
+          enemy.fireTimer -= delta * (1 + audioIntensity(live) * .7);
+          if (enemy.fireTimer <= 0) {
+            firePattern(game.enemyBullets, enemy.x, enemy.y, player, enemy.pattern, enemy.projectile, 7 + Math.min(2, game.level * .12), enemy.subBoss ? 5 : 3, Math.round(enemy.frame));
+            enemy.fireTimer = enemy.fireRate;
+          }
+        }
+        if (enemy.y > H + 70) enemy.alive = false;
+        const enemyOnScreen = enemy.y + enemy.radius >= 0 && enemy.y - enemy.radius <= H;
+        if (!enemy.exiting && enemyOnScreen && enemyHitsPlayer(enemy, player)) {
+          enemy.alive = false;
+          spawnDeathDebris(game.debris, enemy.x, enemy.y, enemy.radius, COLORS[enemy.behavior]);
+          if (player.invincible <= 0) {
+            player.health = Math.max(0, player.health - (enemy.subBoss ? 22 : enemy.behavior === 'TANK' ? 25 : 14));
+            player.invincible = 90;
+            spawnParticles(game.particles, player.x, player.y, '#ff3333', 14);
+            if (player.health <= 0) gameOver();
           }
         }
       }
+      game.enemies = game.enemies.filter((enemy) => enemy.alive);
        advanceProjectiles(game.bullets, game.enemyBullets, delta, W, H);
       for (const bullet of game.bullets) {
         if (!bullet.alive) continue;
@@ -850,13 +957,14 @@ function Home() {
           if (!enemy.alive) continue;
             if (playerShotHitsTarget(bullet, enemy)) { bullet.alive = false; enemy.health -= 1; spawnImpactDust(game.particles, bullet.x, bullet.y, COLORS[enemy.behavior]); if (enemy.health <= 0) { enemy.alive = false; game.score += 100 + enemy.maxHealth * 20; spawnDeathDebris(game.debris, enemy.x, enemy.y, enemy.radius, COLORS[enemy.behavior]); } break; }
         }
+        if (!bullet.alive) continue;
         const boss = game.boss;
-         if (game.state === 'BOSS' && boss && boss.phase !== 'DYING' && playerShotHitsTarget(bullet, boss)) { bullet.alive = false; damageBoss(boss); game.score += 40; spawnParticles(game.particles, bullet.x, bullet.y, '#ffaa00', 5, 2, 6); }
+         if (game.state === 'BOSS' && boss && boss.phase !== 'DYING' && playerShotHitsTarget(bullet, boss)) { bullet.alive = false; damageBoss(boss); game.score += 40; spawnParticles(game.particles, bullet.x, bullet.y, '#ffaa00', 5, 2, 6); if (boss.health === 0) clearHostilesOnBossDeath(); }
       }
         for (const bullet of game.enemyBullets) { if (bullet.alive && enemyShotHitsPlayer(bullet, player, PLAYER_W, PLAYER_H)) { bullet.alive = false; if (player.invincible <= 0) { player.health = Math.max(0, player.health - bullet.damage); player.invincible = 90; spawnParticles(game.particles, player.x, player.y, '#ff3333', 14); if (player.health <= 0) gameOver(); } } }
       game.bullets = game.bullets.filter((bullet) => bullet.alive);
       game.enemyBullets = game.enemyBullets.filter((bullet) => bullet.alive);
-       setHud({ score: game.score, health: player.health, behavior: game.currentBehavior || 'SCANNING', phase: game.boss?.phase ?? '', bossHealth: game.boss?.health ?? 0, bossMaxHealth: game.boss?.maxHealth ?? 1, stageSecondsLeft });
+       setHud({ level: game.level, score: game.score, health: player.health, behavior: game.currentBehavior || 'SCANNING', phase: game.boss?.phase ?? '', bossHealth: game.boss?.health ?? 0, bossMaxHealth: game.boss?.maxHealth ?? 1, stageSecondsLeft: game.state === 'BOSS_INTRO' ? Math.ceil(Math.max(0, game.introTimer) / 60) : stageSecondsLeft });
     };
     const draw = () => {
       const game = gameRef.current;
@@ -891,7 +999,8 @@ function Home() {
        for (const enemy of game.enemies) {
          const color = COLORS[enemy.behavior];
          ctx.globalAlpha = .85;
-         drawShape(ctx, enemy.x, enemy.y, enemy.radius, enemy.shape, color);
+          drawGeneratedForm(ctx, enemy.x, enemy.y, enemy.radius, enemy.form, color, enemy.frame);
+          if (enemy.subBoss) { ctx.strokeStyle = '#ffb347'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 7, 0, Math.PI * 2); ctx.stroke(); }
          ctx.globalAlpha = 1;
           drawEnemyDamage(ctx, enemy);
        }
@@ -902,12 +1011,12 @@ function Home() {
          gradient.addColorStop(0, `${color}55`); gradient.addColorStop(1, 'transparent');
          ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius * 2.2, 0, Math.PI * 2); ctx.fill();
          ctx.globalAlpha = .9;
-         drawShape(ctx, boss.x, boss.y, boss.radius, boss.shape, color);
+          drawGeneratedForm(ctx, boss.x, boss.y, boss.radius, boss.form, color, boss.frame);
          ctx.globalAlpha = 1;
          for (let ring = 1; ring <= 2; ring += 1) { ctx.strokeStyle = color; ctx.globalAlpha = .32 / ring; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius + ring * 14, 0, Math.PI * 2); ctx.stroke(); }
          ctx.globalAlpha = 1;
        }
-      const showPlayer = game.state === 'PLAYING' || game.state === 'STAGE_EXIT' || game.state === 'BOSS' || game.state === 'COUNTDOWN';
+       const showPlayer = game.state === 'PLAYING' || game.state === 'BOSS_INTRO' || game.state === 'BOSS' || game.state === 'COUNTDOWN';
         drawPlayer(ctx, game.player.x, game.player.y, game.player.frame, showPlayer, game.player.health);
        if (showPlayer && game.player.invincible > 0) {
          ctx.save();
@@ -918,8 +1027,35 @@ function Home() {
          ctx.stroke();
          ctx.restore();
        }
-       if (game.state === 'PLAYING' || game.state === 'BOSS') drawJoystick(ctx, joystickRef.current);
+        if (game.state === 'PLAYING' || game.state === 'BOSS' || game.state === 'BOSS_INTRO') drawJoystick(ctx, joystickRef.current);
     };
+    const testWindow = window as Window & { __AUDIOSTRIKE_TEST_MODE__?: boolean; __AUDIOSTRIKE_TEST__?: {
+      snapshot: () => object; finishBoss: () => void; spawnSubBoss: () => void;
+    } };
+    if (import.meta.env.DEV && testWindow.__AUDIOSTRIKE_TEST_MODE__) {
+      testWindow.__AUDIOSTRIKE_TEST__ = {
+        snapshot: () => {
+          const game = gameRef.current;
+          return {
+            state: game.state, level: game.level, spawnIndex: game.spawnIndex,
+            enemyCount: game.enemies.length, subBossCount: game.enemies.filter((enemy) => enemy.subBoss).length, hostileShots: game.enemyBullets.length,
+            bossHealth: game.boss?.health, bossMaxHealth: game.boss?.maxHealth, bossX: game.boss?.x, bossY: game.boss?.y, bossRadius: game.boss?.radius,
+            stageTime: (performance.now() - game.songStart) / 1000,
+            stageAudioTime: stageAudioRef.current?.currentTime, stageAudioPaused: stageAudioRef.current?.paused, stageAudioSrc: stageAudioRef.current?.src,
+            bossAudioTime: bossAudioRef.current?.currentTime, bossAudioPaused: bossAudioRef.current?.paused, bossAudioSrc: bossAudioRef.current?.src,
+            starY: stars[0]?.y, playerHealth: game.player.health,
+          };
+        },
+        finishBoss: () => {
+          const boss = gameRef.current.boss;
+          if (!boss) throw new Error('No boss to finish');
+          boss.health = 0;
+          boss.phase = 'DYING';
+          boss.dyingTimer = 0;
+        },
+        spawnSubBoss: () => spawnSubBoss(readReactiveTrack(gameRef.current.bossReactive)),
+      };
+    }
     const loop = (now: number) => {
       const delta = Math.min(2.2, (now - last) / 16.67);
       last = now;
@@ -928,7 +1064,10 @@ function Home() {
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (import.meta.env.DEV) delete testWindow.__AUDIOSTRIKE_TEST__;
+    };
   }, [playTrack, resumeAudio, state, syncState]);
 
   useEffect(() => () => resetAudio(), [resetAudio]);
@@ -941,7 +1080,7 @@ function Home() {
     return { x: (event.clientX - rect.left) * W / rect.width, y: (event.clientY - rect.top) * H / rect.height };
   };
   const onJoystickDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if ((gameRef.current.state !== 'PLAYING' && gameRef.current.state !== 'BOSS') || joystickRef.current.pointerId !== null) return;
+    if ((gameRef.current.state !== 'PLAYING' && gameRef.current.state !== 'BOSS' && gameRef.current.state !== 'BOSS_INTRO') || joystickRef.current.pointerId !== null) return;
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     event.preventDefault();
     const position = pointerPosition(event);
@@ -983,7 +1122,7 @@ function Home() {
     playTrack(audio, bossTrack ? 'Boss track' : 'Stage track');
   };
   const canStart = Boolean(stageFile && bossFile);
-  const isGame = state === 'COUNTDOWN' || state === 'PLAYING' || state === 'STAGE_EXIT' || state === 'BOSS_INTRO' || state === 'BOSS' || state === 'GAME_OVER' || state === 'VICTORY';
+  const isGame = state === 'COUNTDOWN' || state === 'PLAYING' || state === 'BOSS_INTRO' || state === 'BOSS' || state === 'GAME_OVER';
 
   return (
     <main className="arcade-app" data-testid="page-audiostrike">
@@ -1030,7 +1169,8 @@ function Home() {
             <canvas ref={canvasRef} className="game-canvas" onPointerDown={onJoystickDown} onPointerMove={onJoystickMove} onPointerUp={onJoystickRelease} onPointerCancel={onJoystickRelease} onLostPointerCapture={onJoystickRelease} data-testid="canvas-game" aria-label="AudioStrike game field. Steer with touch or a game controller; weapons fire automatically." />
             <div className="hud-top">
               <div className="hud-chip"><div className="font-mono text-[8px] uppercase tracking-[.16em] text-slate-500">Score</div><div className="font-mono text-sm font-bold text-cyan-200" data-testid="text-score">{String(hud.score).padStart(6, '0')}</div></div>
-              {state === 'PLAYING' && <div className="hud-stage-timer font-mono" role="timer" aria-label={`Boss arrives in ${hud.stageSecondsLeft} seconds`} data-testid="text-stage-time"><div className="text-[8px] uppercase tracking-[.12em] text-slate-400">Boss in</div><div className="text-sm font-bold tabular-nums text-cyan-200">{hud.stageSecondsLeft}s</div></div>}
+              <div className="hud-chip font-mono" data-testid="text-level"><div className="text-[8px] uppercase tracking-[.16em] text-slate-500">Level</div><div className="text-sm font-bold text-cyan-200">{hud.level}</div></div>
+              {(state === 'PLAYING' || state === 'BOSS_INTRO') && <div className="hud-stage-timer font-mono" role="timer" aria-label={`Boss arrives in ${hud.stageSecondsLeft} seconds`} data-testid="text-stage-time"><div className="text-[8px] uppercase tracking-[.12em] text-slate-400">Boss in</div><div className="text-sm font-bold tabular-nums text-cyan-200">{hud.stageSecondsLeft}s</div></div>}
               <div className="text-right"><div className="font-mono text-[8px] uppercase tracking-[.16em] text-slate-500">Threat</div><div className="font-mono text-xs font-bold text-orange-300" data-testid="text-behavior">{hud.behavior}</div></div>
             </div>
             <div className="hud-bottom">
@@ -1040,9 +1180,7 @@ function Home() {
             </div>
             {audioError && <div className="audio-alert" role="alert"><span>{audioError}</span><button type="button" onClick={retryAudio} className="rounded border border-orange-300 px-2 py-1 font-bold text-orange-200">Retry audio</button></div>}
             {state === 'COUNTDOWN' && <div className="state-overlay" data-testid="overlay-countdown"><div><p className="font-mono text-[10px] uppercase tracking-[.28em] text-cyan-300">Get ready</p><div className="mt-2 text-8xl font-extrabold text-cyan-200" data-testid="text-countdown">{countdown}</div><p className="mt-1 font-mono text-[10px] uppercase tracking-[.18em] text-slate-500">Touch, left stick, or D-pad · weapons auto-fire</p></div></div>}
-            {state === 'BOSS_INTRO' && <div className="state-overlay" data-testid="overlay-boss-intro"><div className="overlay-card"><div className="phase-ring"><span className="font-mono text-lg text-orange-300">BOSS</span></div><p className="font-mono text-[10px] uppercase tracking-[.3em] text-orange-300">Stage clear</p><h2 className="mt-3 text-4xl font-extrabold tracking-[.08em] text-slate-100">THE SIGNAL WAKES</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Three phases. One last track.</p></div></div>}
             {state === 'GAME_OVER' && <div className="state-overlay" data-testid="overlay-game-over"><div className="overlay-card"><p className="font-mono text-[10px] uppercase tracking-[.28em] text-red-300">Flight terminated</p><h2 className="mt-3 text-5xl font-extrabold tracking-[.08em] text-red-200">SYSTEM DOWN</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Final score {hud.score}. Tap replay to re-enter the mix.</p><button onClick={beginCountdown} className="action-button mt-7 inline-flex items-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-game-over"><RotateCcw className="h-3.5 w-3.5" /> Replay mission</button></div></div>}
-            {state === 'VICTORY' && <div className="state-overlay" data-testid="overlay-victory"><div className="overlay-card"><p className="font-mono text-[10px] uppercase tracking-[.28em] text-green-300">Signal captured</p><h2 className="mt-3 text-5xl font-extrabold tracking-[.08em] text-green-200">VICTORY</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Boss core collapsed. Final score {hud.score}.</p><button onClick={beginCountdown} className="action-button mt-7 inline-flex items-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-victory"><RotateCcw className="h-3.5 w-3.5" /> Run it back</button></div></div>}
           </div>
         </section>
       )}
