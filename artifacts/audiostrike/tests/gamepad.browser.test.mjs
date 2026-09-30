@@ -7,11 +7,11 @@ import { chromium } from 'playwright-core';
 // Override AUDIOSTRIKE_TEST_URL and CHROMIUM_PATH when running outside Replit.
 const url = process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/';
 
-function pad(index, { x = 0, y = 0, buttons = [] } = {}) {
+function pad(index, { x = 0, y = 0, buttons = [], connected = true } = {}) {
   return {
     id: `Test controller ${index}`,
     index,
-    connected: true,
+    connected,
     mapping: 'standard',
     axes: [x, y],
     buttons: Array.from({ length: 16 }, (_, button) => ({
@@ -48,6 +48,7 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
     await page.addInitScript(() => {
       window.__pads = [null, null];
       Object.defineProperty(navigator, 'getGamepads', { configurable: true, value: () => window.__pads });
+      window.__shipSamples = [];
 
       // Observe the player sprite's actual canvas draw, rather than a separate test-only
       // copy of its coordinates. The green 20x32 rounded rectangle is the ship body.
@@ -55,6 +56,7 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
       CanvasRenderingContext2D.prototype.roundRect = function (x, y, width, height, ...rest) {
         if (width === 20 && height === 32 && this.fillStyle === '#00ff88') {
           window.__ship = { x: x + 10, y: y + 16 };
+          window.__shipSamples.push(window.__ship);
         }
         return roundRect.call(this, x, y, width, height, ...rest);
       };
@@ -78,6 +80,53 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
       assert.ok((await page.evaluate(() => window.__ship.x) - start) * direction > 24, `${phase}: ${description} must move the ship`);
     }
 
+    async function assertReleaseSettles(phase, description, pads, direction, statusText) {
+      const start = await page.evaluate(() => window.__ship.x);
+      const sampleStart = await page.evaluate(() => window.__shipSamples.length);
+      await page.evaluate((next) => {
+        window.__pads = next;
+        if (next.every((gamepad) => !gamepad?.connected)) {
+          window.dispatchEvent(new Event('gamepaddisconnected'));
+        }
+      }, pads);
+
+      await page.waitForFunction(
+        ({ start, direction, sampleStart }) => window.__shipSamples
+          .slice(sampleStart)
+          .some(({ x }) => (x - start) * direction > 6),
+        { start, direction, sampleStart },
+        { timeout: 2500 },
+      );
+      await page.waitForFunction((sampleStart) => {
+        const samples = window.__shipSamples.slice(sampleStart);
+        if (samples.length < 14) return false;
+        const tail = samples.slice(-10);
+        const settled = tail.every(({ x }) => Math.abs(x - tail[0].x) < 0.1);
+        const traveled = Math.abs(samples.at(-1).x - samples[0].x);
+        return settled && traveled > 6;
+      }, sampleStart, { timeout: 3000 });
+      await page.waitForFunction(
+        (text) => document.querySelector('[data-testid="controller-status"]')?.textContent?.includes(text),
+        statusText,
+        { timeout: 2000 },
+      );
+
+      const samples = await page.evaluate((offset) => window.__shipSamples.slice(offset), sampleStart);
+      const directionalSteps = samples.slice(1).map((sample, index) => (
+        (sample.x - samples[index].x) * direction
+      )).filter((distance) => distance > 0.1);
+      assert.ok(directionalSteps.length > 1, `${phase}: ${description} must show residual movement`);
+      assert.ok(
+        directionalSteps[0] > directionalSteps.at(-1),
+        `${phase}: ${description} must slow the ship before it stops`,
+      );
+      assert.ok(
+        samples.slice(-10).every(({ x }, index, tail) => Math.abs(x - tail[0].x) < 0.1),
+        `${phase}: ${description} must leave the ship stationary`,
+      );
+      assert.match(await page.getByTestId('controller-status').innerText(), new RegExp(statusText));
+    }
+
     for (const phase of ['PLAYING', 'BOSS']) {
       if (phase === 'BOSS') {
         // Skip the 30-second stage while still running the real stage-exit,
@@ -91,6 +140,10 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
       await moves(phase, 'second controller while first is idle', [pad(0), pad(1, { x: 0.9 })], 1);
       await page.waitForFunction(() => document.querySelector('[data-testid="controller-status"]')?.textContent?.includes('stick 0.90, 0.00'));
       assert.match(await page.getByTestId('controller-status').innerText(), /stick 0\.90, 0\.00/, `${phase}: status must reflect the active second controller`);
+      await moves(phase, 'left stick left before releasing it', [pad(0, { x: -0.9 }), null], -1);
+      await assertReleaseSettles(phase, 'neutral input', [pad(0), null], -1, 'stick 0.00, 0.00');
+      await moves(phase, 'left stick right before disconnecting', [pad(0, { x: 0.9 }), null], 1);
+      await assertReleaseSettles(phase, 'controller disconnect', [pad(0, { connected: false }), null], 1, 'No controller detected');
     }
   } finally {
     await browser.close();
