@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
+import { STAGE_LEVEL_SECONDS } from '../src/gameRules.ts';
 
 // Run against the managed AudioStrike preview: pnpm --filter @workspace/audiostrike test:browser
 // Override AUDIOSTRIKE_TEST_URL and CHROMIUM_PATH when running outside Replit.
@@ -129,10 +130,10 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
 
     for (const phase of ['PLAYING', 'BOSS']) {
       if (phase === 'BOSS') {
-        // Skip the 30-second stage while still running the real stage-exit,
+        // Skip the stage while still running the real stage-exit,
         // boss-intro, and boss gameplay loops.
         await page.evaluate(() => { window.__pads = [null, null]; });
-        await page.clock.fastForward(31_000);
+        await page.clock.fastForward((STAGE_LEVEL_SECONDS + 1) * 1000);
         await page.locator('[data-testid="text-boss-health"]').waitFor({ timeout: 8000 });
       }
       await moves(phase, 'left stick right', [pad(0, { x: 0.9 }), null], 1);

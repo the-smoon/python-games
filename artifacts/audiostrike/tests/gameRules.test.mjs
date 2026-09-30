@@ -6,17 +6,17 @@ import {
   spawnPressure, stageProgress, STAGE_LEVEL_SECONDS,
 } from '../src/gameRules.ts';
 
-test('stage runs for 30 seconds regardless of track duration, then exits', () => {
-  assert.equal(STAGE_LEVEL_SECONDS, 30);
-  for (const songTime of [0, 12, 29.999]) assert.equal(stageProgress(songTime).finished, false);
-  assert.deepEqual(stageProgress(30), { secondsLeft: 0, progress: 1, finished: true });
-  assert.equal(stageProgress(35).finished, true);
-  assert.equal(stageProgress(12).secondsLeft, 18);
+test('stage runs for 60 seconds regardless of track duration, then exits', () => {
+  assert.equal(STAGE_LEVEL_SECONDS, 60);
+  for (const songTime of [0, 12, 59.999]) assert.equal(stageProgress(songTime).finished, false);
+  assert.deepEqual(stageProgress(60), { secondsLeft: 0, progress: 1, finished: true });
+  assert.equal(stageProgress(65).finished, true);
+  assert.equal(stageProgress(12).secondsLeft, 48);
 });
 
 test('quiet-track waves become larger and more frequent from early to late stage', () => {
   const early = spawnPressure(stageProgress(0).progress, 0, 0, 0);
-  const late = spawnPressure(stageProgress(29).progress, 0, 0, 0);
+  const late = spawnPressure(stageProgress(59).progress, 0, 0, 0);
   assert.equal(early.count, 1);
   assert.equal(early.cooldown, 84);
   assert.ok(late.count >= 3, `late quiet wave should have at least three enemies: ${late.count}`);
