@@ -10,3 +10,5 @@ Advance timed gameplay with the browser test runner's clock rather than overridi
 **How to apply:** When testing timed phase changes, fast-forward the browser's coordinated clock so animation callbacks and performance time share the same timeline. Keep browser-level tests separate from fast unit tests because they need a running preview and Chromium.
 
 Treat any fast-forward that crosses the stage boundary as coupled to the actual stage length. **Why:** A shorter skip can make a controller test appear to fail in the boss phase even when its controller behavior already passed in the stage. **How to apply:** When stage timing changes, adjust browser-test phase transitions as part of the same work.
+
+Use monotonic encounter elapsed time for stage cutoffs, not the audio element's playback position. **Why:** Tracks deliberately loop independently of the encounter, so `currentTime` resets on each loop and would extend or strand a short-track stage. **How to apply:** Keep the audio playback position only for analysis and seeking; time stage transitions against the browser clock and fast-forward it as a unit in regressions.

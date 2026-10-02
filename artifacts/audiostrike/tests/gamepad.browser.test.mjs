@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
 import { STAGE_LEVEL_SECONDS } from '../src/gameRules.ts';
+import { bossHealth } from '../src/encounterRules.ts';
 
 // Run against the managed AudioStrike preview: pnpm --filter @workspace/audiostrike test:browser
 // Override AUDIOSTRIKE_TEST_URL and CHROMIUM_PATH when running outside Replit.
@@ -38,6 +39,51 @@ function silentWav() {
   wav.write('data', 36);
   wav.writeUInt32LE(samples * 2, 40);
   return wav;
+}
+
+function toneWav(frequency) {
+  const rate = 16000, samples = rate * 2;
+  const wav = Buffer.alloc(44 + samples * 2);
+  wav.write('RIFF', 0); wav.writeUInt32LE(wav.length - 8, 4);
+  wav.write('WAVEfmt ', 8); wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 2, 28);
+  wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+  wav.write('data', 36); wav.writeUInt32LE(samples * 2, 40);
+  for (let i = 0; i < samples; i++) {
+    const pulse = Math.floor(i / (rate / 4)) % 2 ? .35 : .8;
+    wav.writeInt16LE(Math.round(Math.sin(i * frequency * 2 * Math.PI / rate) * 32700 * pulse), 44 + i * 2);
+  }
+  return wav;
+}
+
+// Read the real running game session from React's host-fiber during integration tests.
+// No test hooks are exposed in the shipped game.
+async function session(page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('[data-testid="canvas-game"]');
+    const key = Object.keys(canvas).find((name) => name.startsWith('__reactFiber$'));
+    let fiber = canvas[key];
+    while (fiber && fiber.type?.name !== 'Home') fiber = fiber.return;
+    if (!fiber) throw new Error('Running game session not found');
+    let hook = fiber.memoizedState;
+    while (hook && !hook.memoizedState?.current?.player) hook = hook.next;
+    if (!hook) throw new Error('Running game ref not found');
+    const game = hook.memoizedState.current;
+    return {
+      state: game.state, level: game.level, score: game.score,
+      player: { health: game.player.health },
+      stageReactive: { signature: game.stageReactive.signature, element: {
+        src: game.stageReactive.element.src, loop: game.stageReactive.element.loop,
+        currentTime: game.stageReactive.element.currentTime,
+      } },
+      bossReactive: { signature: game.bossReactive.signature, element: {
+        src: game.bossReactive.element.src, loop: game.bossReactive.element.loop,
+      } },
+      boss: game.boss ? { health: game.boss.health, maxHealth: game.boss.maxHealth, shape: game.boss.shape } : null,
+      enemies: game.enemies.map(({ subBoss, health }) => ({ subBoss, health })),
+    };
+  });
 }
 
 test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { timeout: 30000 }, async () => {
@@ -161,8 +207,12 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
         // Skip the stage while still running the real stage-exit,
         // boss-intro, and boss gameplay loops.
         await page.evaluate(() => { window.__pads = [null, null]; });
-        await page.clock.fastForward((STAGE_LEVEL_SECONDS + 1) * 1000);
+         await page.clock.fastForward((STAGE_LEVEL_SECONDS + 1) * 1000);
+         assert.equal(await page.locator('[data-testid="overlay-boss-intro"]').count(), 1, 'the five-second no-spawn transition must precede the boss');
+         await page.clock.fastForward(6000);
         await page.locator('[data-testid="text-boss-health"]').waitFor({ timeout: 8000 });
+         assert.match(await page.getByTestId('text-level').innerText(), /Level\s*1/i);
+         assert.match(await page.getByTestId('text-boss-health').innerText(), /1122 \/ 1122/);
       }
       await moves(phase, 'left stick right', [pad(0, { x: 0.9 }), null], 1);
       await moves(phase, 'D-pad left', [pad(0, { buttons: [14] }), null], -1);
@@ -174,6 +224,78 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
       await moves(phase, 'left stick right before disconnecting', [pad(0, { x: 0.9 }), null], 1);
       await assertReleaseSettles(phase, 'controller disconnect', [pad(0, { connected: false }), null], 1, 'No controller detected');
       await assertReconnectSteers(phase);
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
+test('contrasting audio, boss detachment and reused tracks survive two level handoffs', { timeout: 90000 }, async () => {
+  const executablePath = process.env.CHROMIUM_PATH || execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim();
+  const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage();
+    await page.clock.install();
+    await page.goto(url);
+    await page.getByTestId('input-stage-file').setInputFiles({ name: 'bass.wav', mimeType: 'audio/wav', buffer: toneWav(100) });
+    await page.getByTestId('input-boss-file').setInputFiles({ name: 'bright.wav', mimeType: 'audio/wav', buffer: toneWav(3000) });
+    await page.getByTestId('button-analyze').click();
+    await page.getByTestId('text-stage-time').waitFor({ timeout: 8000 });
+    await page.clock.runFor(1600);
+    const stage = await session(page);
+    assert.ok(stage.stageReactive.signature.low > stage.stageReactive.signature.high, 'bass stage fixture must register as bass-dominant');
+    const stageSource = stage.stageReactive.element.src;
+    const bossSource = stage.bossReactive.element.src;
+    assert.equal(stage.stageReactive.element.loop, true);
+    assert.equal(stage.bossReactive.element.loop, true);
+    await page.clock.fastForward((STAGE_LEVEL_SECONDS + 1) * 1000);
+    const transitionStart = await session(page);
+    assert.equal(transitionStart.state, 'BOSS_INTRO');
+    await page.clock.fastForward(4000);
+    const transitionEnd = await session(page);
+    assert.equal(transitionEnd.state, 'BOSS_INTRO', 'boss cannot arrive before the five-second transition');
+    assert.ok(transitionEnd.enemies.length <= transitionStart.enemies.length, 'no regular enemies spawn during transition');
+    await page.clock.fastForward(1100);
+    await page.getByTestId('text-boss-health').waitFor();
+    await page.clock.runFor(3000);
+    const encounter = await session(page);
+    assert.ok(encounter.bossReactive.signature.high > encounter.bossReactive.signature.low, 'bright boss fixture must register as treble-dominant');
+    assert.notEqual(encounter.boss.shape, 'HEX', 'boss form must differ from bass-dominant form');
+    assert.ok(encounter.enemies.some((enemy) => enemy.subBoss), 'a detached, independently hittable part enters on phase one');
+    assert.equal(encounter.boss.maxHealth, bossHealth(18, 1));
+    assert.equal(encounter.bossReactive.element.src, bossSource);
+
+    for (let level = 2; level <= 3; level++) {
+      await page.evaluate(() => {
+        const canvas = document.querySelector('[data-testid="canvas-game"]');
+        const key = Object.keys(canvas).find((name) => name.startsWith('__reactFiber$'));
+        let fiber = canvas[key];
+        while (fiber && fiber.type?.name !== 'Home') fiber = fiber.return;
+        let hook = fiber.memoizedState;
+        while (hook && !hook.memoizedState?.current?.player) hook = hook.next;
+        const game = hook.memoizedState.current;
+        game.boss.health = 1;
+        game.boss.phase = 'PHASE3';
+        game.boss.phaseFrame = 100;
+        game.boss.motion = 'CHASE';
+        game.boss.x = game.player.x;
+        game.player.y = 280;
+      });
+      await page.clock.runFor(5500);
+      await page.waitForFunction((expected) => document.querySelector('[data-testid="text-level"]')?.textContent?.endsWith(String(expected)), level, { timeout: 5000 });
+      const next = await session(page);
+      assert.equal(next.state, 'PLAYING');
+      assert.equal(next.boss, null);
+      assert.equal(next.stageReactive.element.src, stageSource, 'the original stage track is reused');
+      assert.equal(next.stageReactive.element.currentTime < 8, true, 'stage track restarts from its beginning');
+      assert.equal(next.bossReactive.element.src, bossSource, 'the original boss track is retained');
+      assert.ok(next.player.health > 0);
+      assert.ok(next.score > 0);
+      if (level === 3) break;
+      await page.clock.fastForward((STAGE_LEVEL_SECONDS + 1) * 1000);
+      await page.clock.fastForward(6000);
+      await page.getByTestId('text-boss-health').waitFor();
+      assert.equal((await session(page)).boss.maxHealth, bossHealth(18, level));
     }
   } finally {
     await browser.close();

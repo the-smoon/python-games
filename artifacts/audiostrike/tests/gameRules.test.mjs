@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  advanceBossDeath, advanceProjectiles, bossPhase, configureGameplayAudio,
+  advanceBossDeath, advanceProjectiles, attackInterval, attackVectors, bossPhase, BOSS_TRANSITION_SECONDS, configureGameplayAudio, detachSubBoss, encounterSignature, nextLevel,
   damageBoss, enemyShotHitsPlayer, moveBoss, playerShotHitsTarget,
   spawnPressure, stageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS,
 } from '../src/gameRules.ts';
+import { bossHealth } from '../src/encounterRules.ts';
 
-test('stage runs for 30 seconds regardless of track duration, then exits', () => {
+test('stage runs for 30 seconds regardless of track duration, followed by five seconds before entry', () => {
   assert.equal(STAGE_LEVEL_SECONDS, 30);
-  assert.equal(BOSS_ARRIVAL_SECONDS, 5);
+  assert.equal(BOSS_TRANSITION_SECONDS, 5);
+  assert.equal(BOSS_ARRIVAL_SECONDS, BOSS_TRANSITION_SECONDS);
   for (const songTime of [0, 12, 29.999]) assert.equal(stageProgress(songTime).finished, false);
   assert.deepEqual(stageProgress(30), { secondsLeft: 0, progress: 1, finished: true });
   assert.equal(stageProgress(35).finished, true);
@@ -19,10 +21,49 @@ test('quiet-track waves become larger and more frequent from early to late stage
   const early = spawnPressure(stageProgress(0).progress, 0, 0, 0);
   const late = spawnPressure(stageProgress(29).progress, 0, 0, 0);
   assert.equal(early.count, 1);
-  assert.equal(early.cooldown, 84);
-  assert.ok(late.count >= 3, `late quiet wave should have at least three enemies: ${late.count}`);
+  assert.equal(early.cooldown, 90);
+  assert.ok(late.count >= 2, `late quiet wave should have at least two enemies: ${late.count}`);
   assert.ok(late.cooldown < early.cooldown, 'quiet waves must become more frequent');
-  assert.ok(late.cooldown >= 24, 'cooldown cannot fall below its floor');
+  assert.ok(late.cooldown >= 23, 'cooldown cannot fall below its floor');
+});
+
+const quiet = { rms: .02, onset: 0, low: .02, mid: .01, high: .01, centroid: .1, flatness: .2, pulse: false };
+const bass = { rms: .72, onset: .7, low: .9, mid: .3, high: .1, centroid: .2, flatness: .55, pulse: true };
+const bright = { rms: .7, onset: .75, low: .1, mid: .4, high: .88, centroid: .7, flatness: .7, pulse: true };
+
+test('contrasting songs change form, movement, attacks and intensity while remaining bounded', () => {
+  assert.notDeepEqual(encounterSignature(bass), encounterSignature(bright));
+  assert.deepEqual(encounterSignature(bass), { shape: 'HEX', motion: 'SWEEP', attack: 'RADIAL', projectile: 'RING' });
+  assert.deepEqual(encounterSignature(bright), { shape: 'TRIANGLE', motion: 'HUNT', attack: 'BURST', projectile: 'SHARD' });
+  assert.ok(spawnPressure(.5, bright.rms, bright.onset, bright.high).cooldown < spawnPressure(.5, quiet.rms, quiet.onset, quiet.high).cooldown);
+  assert.ok(attackInterval(bright, 1, true) < attackInterval(quiet, 1, true));
+  assert.ok(attackInterval(bright, 20, true) >= 22);
+  assert.ok(spawnPressure(1, 1, 1, 1, 30).count <= 6);
+  assert.ok(spawnPressure(1, 1, 1, 1, 30).cooldown >= 23);
+});
+
+test('regular enemies, detached parts and bosses share bounded attack choices', () => {
+  for (const pattern of ['TRACK', 'BURST', 'RADIAL']) {
+    const vectors = attackVectors(pattern, 4, 8, 0, .9);
+    assert.equal(vectors.length, pattern === 'RADIAL' ? 8 : pattern === 'BURST' ? 5 : 1);
+    assert.ok(vectors.every(({ x, y }) => Math.abs(Math.hypot(x, y) - 1) < .00001));
+  }
+});
+
+test('sub-bosses detach independently, scale with the level and cannot exceed the active cap', () => {
+  const first = detachSubBoss(2, 0, 1);
+  assert.deepEqual(first, { remaining: 1, health: 30 });
+  assert.deepEqual(detachSubBoss(first.remaining, 1, 2), { remaining: 0, health: 36 });
+  assert.equal(detachSubBoss(0, 0, 1), null);
+  assert.equal(detachSubBoss(2, 4, 1), null);
+});
+
+test('first boss has half the 2100 baseline; later levels increase pressure without resetting', () => {
+  assert.equal(bossHealth(0, 1), 1050);
+  assert.ok(bossHealth(18, 2) > bossHealth(18, 1));
+  assert.equal(nextLevel(1), 2);
+  assert.equal(nextLevel(nextLevel(1)), 3);
+  assert.ok(spawnPressure(.3, .5, .5, .5, 4).cooldown < spawnPressure(.3, .5, .5, .5, 1).cooldown);
 });
 
 test('both uploaded tracks loop when shorter than their encounters', () => {
@@ -67,7 +108,7 @@ test('opposing projectiles cross without cancelling; only targets receive hits',
   assert.equal(enemyShotHitsPlayer({ x: 416, y: 300, radius: 6 }, { x: 400, y: 300 }, 20, 32), true);
 });
 
-test('final boss hit enters death sequence before the next level begins', () => {
+test('final boss hit enters death sequence and is ready for next-level transition after delay', () => {
   const boss = { health: 2, maxHealth: 2, phase: 'PHASE3', dyingTimer: 0 };
   assert.equal(damageBoss(boss), true);
   assert.equal(boss.health, 1);

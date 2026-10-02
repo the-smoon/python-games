@@ -1,4 +1,6 @@
 export const STAGE_LEVEL_SECONDS = 30;
+
+export const BOSS_TRANSITION_SECONDS = 5;
 export const BOSS_ARRIVAL_SECONDS = 5;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -11,13 +13,15 @@ export function stageProgress(songTime: number) {
   };
 }
 
-export function spawnPressure(progress: number, intensity: number, onset: number, high: number) {
+export function spawnPressure(progress: number, intensity: number, onset: number, high: number, level = 1) {
+  const difficulty = Math.min(8, Math.max(0, level - 1));
   return {
-    count: Math.min(5, 1 + Math.floor(progress * 2.5 + intensity * 1.5 + (onset > .8 ? 1 : 0))),
-    cooldown: clamp(84 - progress * 51 - intensity * 15 - high * 5, 24, 84),
+    count: Math.min(6, 1 + Math.floor(progress * 1.5 + intensity * 2 + (onset > .55 ? 1 : 0) + difficulty * .32)),
+    cooldown: clamp(90 - progress * 22 - intensity * 32 - onset * 12 - high * 7 - difficulty * 3, 23, 90),
   };
 }
 
+export type MusicSignal = { rms: number; onset: number; low: number; mid: number; high: number; centroid: number; flatness: number; pulse: boolean };
 export type BossPhase = 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING';
 export type BossMotion = { x: number; y: number; radius: number; vx: number; phaseFrame: number; phase: BossPhase };
 export type BossHealth = { health: number; maxHealth: number; phase: BossPhase; dyingTimer: number };
@@ -103,3 +107,39 @@ export function configureGameplayAudio(stage: { loop: boolean }, boss: { loop: b
   stage.loop = true;
   boss.loop = true;
 }
+
+export function attackVectors(pattern: AttackPattern, dx: number, dy: number, phase: number, high: number) {
+  const angle = Math.atan2(dy, dx);
+  const count = pattern === 'RADIAL' ? 8 : pattern === 'BURST' ? (high > .6 ? 5 : 3) : 1;
+  return Array.from({ length: count }, (_, index) => {
+    const a = pattern === 'RADIAL' ? phase + index * Math.PI * 2 / count : angle + (index - (count - 1) / 2) * .2;
+    return { x: Math.cos(a), y: Math.sin(a) };
+  });
+}
+
+export function encounterSignature(signal: MusicSignal) {
+  const shape = signal.low > signal.high * 1.2 ? 'HEX' : signal.high > signal.mid * 1.18 ? 'TRIANGLE' : signal.flatness < .3 ? 'DIAMOND' : 'RING';
+  const motion: MotionStyle = signal.low > signal.high * 1.2 ? 'SWEEP' : signal.high > signal.low * 1.2 ? 'HUNT' : 'ORBIT';
+  const attack: AttackPattern = signal.low > signal.high * 1.2 ? 'RADIAL' : signal.high > signal.low * 1.2 ? 'BURST' : 'TRACK';
+  const projectile = signal.high > signal.low * 1.2 ? 'SHARD' : signal.low > signal.mid * 1.2 ? 'RING' : signal.mid > .3 ? 'BOLT' : 'ORB';
+  return { shape, motion, attack, projectile };
+}
+
+export function nextLevel(level: number) { return level + 1; }
+
+export type MotionStyle = 'ORBIT' | 'SWEEP' | 'HUNT';
+
+export function detachSubBoss(parts: number, active: number, level: number) {
+  if (parts <= 0 || active >= 4) return null;
+  return {
+    remaining: parts - 1,
+    health: Math.round(30 * (1 + Math.min(8, Math.max(0, level - 1)) * .2)),
+  };
+}
+
+export function attackInterval(signal: MusicSignal, level = 1, boss = false) {
+  return clamp((boss ? 105 : 130) - signal.rms * (boss ? 42 : 29) - signal.onset * 20 - signal.mid * 14 -
+    (signal.pulse ? 9 : 0) - Math.min(8, level - 1) * (boss ? 4 : 5), boss ? 26 : 38, boss ? 110 : 150);
+}
+
+export type AttackPattern = 'TRACK' | 'BURST' | 'RADIAL';

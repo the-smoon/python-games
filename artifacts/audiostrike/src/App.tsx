@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Crosshair, FileAudio, Gamepad2, Headphones, RotateCcw, Shield, Volume2, Zap } from 'lucide-react';
-import { advanceBossDeath, advanceProjectiles, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
+import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, encounterSignature, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
 import { audioIntensity, bossHealth, chooseAttack, chooseMotion, generateForm, spawnProfile, type AttackPattern, type FormProfile, type MotionPattern } from './encounterRules';
 import { advancePickup, bombDamage, collectPickup, companionPositions, fireWeapon, freezeSplash, laserHitsTarget, newWeaponState, pickDrop, slowScale, tickFrozenBullet, WEAPON_BALANCE, type LaserBeam, type Pickup, type PickupType, type PlayerShot } from './weaponRules';
@@ -36,6 +36,7 @@ type AudioReactiveTrack = {
   lastTime: number;
   lastPulseAt: number;
   lastFeatures: LiveFeatures;
+  signature: LiveFeatures;
 };
 type EnemyEntity = {
   x: number; y: number; radius: number; health: number; maxHealth: number; speed: number;
@@ -47,7 +48,7 @@ type BulletEntity = PlayerShot;
 type EnemyBulletEntity = { x: number; y: number; vx: number; vy: number; damage: number; alive: boolean; kind?: ProjectileKind; radius: number; spin?: number; frozenUntil?: number };
 type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string };
 type DebrisEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; angle: number; spin: number };
-type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; shape: EnemyShape; projectile: ProjectileKind; pattern: AttackPattern; motion: MotionPattern; form: FormProfile; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; phaseFrame: number; vx: number; fireTimer: number; dyingTimer: number; subBossTimer: number; revision: number; frozenUntil?: number };
+type BossEntity = { x: number; y: number; radius: number; health: number; maxHealth: number; shape: EnemyShape; projectile: ProjectileKind; pattern: AttackPattern; motion: MotionPattern; form: FormProfile; parts: number; phase: 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING'; frame: number; phaseFrame: number; vx: number; fireTimer: number; dyingTimer: number; subBossTimer: number; revision: number; frozenUntil?: number };
 
 const W = 420;
 const H = 900;
@@ -105,6 +106,7 @@ function createReactiveTrack(context: AudioContext, element: HTMLAudioElement): 
     lastTime: -1,
     lastPulseAt: -10,
     lastFeatures: blankLiveFeatures(),
+    signature: blankLiveFeatures(),
   };
 }
 
@@ -115,6 +117,7 @@ function resetReactiveTrack(track: AudioReactiveTrack | null) {
   track.lastTime = -1;
   track.lastPulseAt = -10;
   track.lastFeatures = blankLiveFeatures();
+  track.signature = blankLiveFeatures();
 }
 
 function readReactiveTrack(track: AudioReactiveTrack | null): LiveFeatures {
@@ -172,6 +175,10 @@ function readReactiveTrack(track: AudioReactiveTrack | null): LiveFeatures {
   if (pulse) track.lastPulseAt = now;
   track.lastTime = now;
   track.lastFeatures = { rms, onset, low, mid, high, centroid, flatness, pulse, tempo };
+  for (const key of ['rms', 'onset', 'low', 'mid', 'high', 'centroid', 'flatness', 'tempo'] as const) {
+    track.signature[key] = track.signature[key] * .985 + track.lastFeatures[key] * .015;
+  }
+  track.signature.pulse = pulse;
   return track.lastFeatures;
 }
 
@@ -673,6 +680,7 @@ function Home() {
     };
     const beginBossIntro = () => {
       const game = gameRef.current;
+      resetReactiveTrack(game.bossReactive);
       game.state = 'BOSS_INTRO'; game.bossArrivalAt = performance.now() + BOSS_ARRIVAL_SECONDS * 1000; game.introTimer = BOSS_ARRIVAL_SECONDS * 60; game.enemyBullets = [];
       for (const enemy of game.enemies) { enemy.exiting = true; enemy.fireRate = 0; }
       setAudioError('');
@@ -690,7 +698,9 @@ function Home() {
       const live = readReactiveTrack(game.bossReactive);
       const hp = bossHealth(features.duration, game.level);
       game.player.y = clamp(game.player.y, 90, H - 150);
-      game.boss = { x: W / 2, y: -35, radius: 55, health: hp, maxHealth: hp, shape: chooseBossShape(live), projectile: chooseProjectile(live, 'BOSS'), pattern: chooseAttack(live, game.level), motion: chooseMotion(live, game.level), form: generateForm(live, game.level * 37), phase: 'INTRO', frame: 0, phaseFrame: 0, vx: 1, fireTimer: 0, dyingTimer: 0, subBossTimer: 0, revision: 0 };
+      const signature = game.bossReactive?.signature ?? live;
+      const body = encounterSignature(signature);
+      game.boss = { x: W / 2, y: -35, radius: 55, health: hp, maxHealth: hp, shape: body.shape as EnemyShape, projectile: body.projectile as ProjectileKind, pattern: chooseAttack(live, game.level), motion: chooseMotion(live, game.level), form: generateForm(signature, game.level * 37), parts: 2 + Math.min(2, Math.floor(game.level / 3)), phase: 'INTRO', frame: 0, phaseFrame: 0, vx: 1, fireTimer: 0, dyingTimer: 0, subBossTimer: 0, revision: 0 };
       game.enemies = []; game.bullets = []; game.enemyBullets = []; game.beatIndex = 0;
       game.state = 'BOSS'; game.bossStart = performance.now();
       stageAudioRef.current?.pause();
@@ -702,6 +712,7 @@ function Home() {
       const game = gameRef.current;
       const boss = game.boss;
       if (!boss || game.enemies.filter((enemy) => enemy.subBoss && enemy.alive).length >= 3) return;
+      boss.parts = Math.max(0, boss.parts - 1);
       const serial = game.spawnIndex++ + game.level * 29;
       const radius = 22 + live.low * 8;
       const x = clamp(boss.x + (serial % 2 ? 1 : -1) * (boss.radius + 16), radius, W - radius);
@@ -795,14 +806,12 @@ function Home() {
     };
     const beginNextLevel = () => {
       const game = gameRef.current;
-      game.level += 1;
+      game.level = nextLevel(game.level);
       game.stageDone = false;
       game.spawnCooldown = 0;
       game.enemies = []; game.enemyBullets = []; game.bullets = []; game.boss = null;
       arsenalRef.current.beam = null;
       arsenalRef.current.weapon.chargeStartedAt = null;
-      game.player.vx = 0; game.player.vy = 0;
-      joystickRef.current = neutralJoystick();
       bossAudioRef.current?.pause();
       resetReactiveTrack(game.stageReactive);
       if (stageAudioRef.current) {
@@ -842,6 +851,7 @@ function Home() {
         return;
       }
       if (game.state === 'BOSS_INTRO') {
+        readReactiveTrack(game.bossReactive);
         game.introTimer = Math.max(0, (game.bossArrivalAt - performance.now()) / 1000 * 60);
         const introProgress = clamp(1 - game.introTimer / (BOSS_ARRIVAL_SECONDS * 60), 0, 1);
         if (stageAudioRef.current) stageAudioRef.current.volume = .72 * (1 - introProgress);
@@ -920,7 +930,7 @@ function Home() {
             const radius = clamp(9 + live.low * 17 + variation * 10 + live.high * 5, 9, 42);
             const x = behavior === 'FORMATION' ? (W / (count + 1)) * (enemyIndex + 1) : random(radius + 18, W - radius - 18);
             const health = clamp(1 + Math.round(live.low * 3 + progress * 3 + (game.level - 1) * 1.2), 1, 22);
-            const shape = chooseEnemyShape(live, serial);
+            const shape = enemyIndex % 3 === 0 ? encounterSignature(game.stageReactive?.signature ?? live).shape as EnemyShape : chooseEnemyShape(live, serial);
             const projectile = chooseProjectile(live, behavior);
             const motion = chooseMotion(live, serial);
             const pattern = chooseAttack(live, serial);
@@ -934,7 +944,7 @@ function Home() {
         live = readReactiveTrack(game.bossReactive);
         if (boss.phase === 'INTRO') {
           boss.y += (120 - boss.y) * .035 * delta * slowScale(boss, now);
-          if (boss.y >= 117) { boss.phase = bossPhase(boss.health, boss.maxHealth); boss.phaseFrame = 0; boss.subBossTimer = 180; }
+          if (boss.y >= 117) { boss.phase = bossPhase(boss.health, boss.maxHealth); boss.phaseFrame = 0; boss.subBossTimer = 180; spawnSubBoss(live); }
         } else if (boss.phase === 'DYING') {
           if (game.enemies.length || game.enemyBullets.length) clearHostilesOnBossDeath();
           const deathComplete = advanceBossDeath(boss, delta);
@@ -957,10 +967,10 @@ function Home() {
           }
           if (boss.phaseFrame < delta * 2) {
             const serial = boss.revision + game.level * 37;
-            boss.form = generateForm(live, serial);
+            boss.form = generateForm(game.bossReactive?.signature ?? live, serial);
             boss.motion = chooseMotion(live, serial);
             boss.pattern = chooseAttack(live, serial);
-            boss.shape = chooseBossShape(live);
+            boss.shape = encounterSignature(game.bossReactive?.signature ?? live).shape as EnemyShape;
           }
           boss.projectile = chooseProjectile(live, 'BOSS');
           game.currentBehavior = `BOSS ${boss.pattern}`;
@@ -973,7 +983,7 @@ function Home() {
           boss.fireTimer -= bossDelta * (1 + audioIntensity(live) * .45);
           if (boss.fireTimer <= 0) {
             firePattern(game.enemyBullets, boss.x, boss.y + boss.radius * .3, player, boss.pattern, boss.projectile, 7.4 + Math.min(2, game.level * .18), boss.pattern === 'TRACK' ? 8 : 4, game.frame);
-            boss.fireTimer = clamp(64 - audioIntensity(live) * 39 - live.tempo * .06 - game.level * 2, 17, 65);
+            boss.fireTimer = clamp(attackInterval(live, game.level, true) - live.tempo * .06, 26, 110);
           }
         }
       } else if (game.state === 'BOSS_INTRO') {
@@ -1167,6 +1177,15 @@ function Home() {
          gradient.addColorStop(0, `${color}55`); gradient.addColorStop(1, 'transparent');
          ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius * 2.2, 0, Math.PI * 2); ctx.fill();
          ctx.globalAlpha = .9;
+          for (let index = 0; index < boss.parts; index += 1) {
+            const side = index % 2 ? 1 : -1;
+            const tier = Math.floor(index / 2);
+            const nodeX = boss.x + side * (boss.radius + 20 + tier * 14);
+            const nodeY = boss.y + 12 + tier * 24;
+            ctx.strokeStyle = color; ctx.lineWidth = 7;
+            ctx.beginPath(); ctx.moveTo(boss.x + side * 24, boss.y + 16); ctx.lineTo(nodeX, nodeY); ctx.stroke();
+            drawGeneratedForm(ctx, nodeX, nodeY, 18 - tier * 2, boss.form, color, boss.frame);
+          }
           drawGeneratedForm(ctx, boss.x, boss.y, boss.radius, boss.form, color, boss.frame);
          ctx.globalAlpha = 1;
          for (let ring = 1; ring <= 2; ring += 1) { ctx.strokeStyle = color; ctx.globalAlpha = .32 / ring; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius + ring * 14, 0, Math.PI * 2); ctx.stroke(); }
@@ -1371,6 +1390,7 @@ function Home() {
             </div>
             {audioError && <div className="audio-alert" role="alert"><span>{audioError}</span><button type="button" onClick={retryAudio} className="rounded border border-orange-300 px-2 py-1 font-bold text-orange-200">Retry audio</button></div>}
             {state === 'COUNTDOWN' && <div className="state-overlay" data-testid="overlay-countdown"><div><p className="font-mono text-[10px] uppercase tracking-[.28em] text-cyan-300">Get ready</p><div className="mt-2 text-8xl font-extrabold text-cyan-200" data-testid="text-countdown">{countdown}</div><p className="mt-1 font-mono text-[10px] uppercase tracking-[.18em] text-slate-500">Touch, left stick, or D-pad · weapons auto-fire</p></div></div>}
+            {state === 'BOSS_INTRO' && <div className="pointer-events-none absolute inset-x-0 top-[17%] text-center" data-testid="overlay-boss-intro"><p className="font-mono text-xs font-bold uppercase tracking-[.24em] text-orange-300">Level {hud.level} clear · incoming boss</p></div>}
             {state === 'GAME_OVER' && <div className="state-overlay" data-testid="overlay-game-over"><div className="overlay-card"><p className="font-mono text-[10px] uppercase tracking-[.28em] text-red-300">Flight terminated</p><h2 className="mt-3 text-5xl font-extrabold tracking-[.08em] text-red-200">SYSTEM DOWN</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Final score {hud.score}. Tap replay to re-enter the mix.</p><button onClick={beginCountdown} className="action-button mt-7 inline-flex items-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-game-over"><RotateCcw className="h-3.5 w-3.5" /> Replay mission</button></div></div>}
           </div>
         </section>
