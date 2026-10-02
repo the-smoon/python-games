@@ -52,9 +52,9 @@ export function moveBoss(
   }
 }
 
-export function damageBoss(boss: BossHealth) {
+export function damageBoss(boss: BossHealth, amount = 1) {
   if (boss.phase === 'DYING') return false;
-  boss.health = Math.max(0, boss.health - 1);
+  boss.health = Math.max(0, boss.health - Math.max(0, amount));
   if (boss.health === 0) {
     boss.phase = 'DYING';
     boss.dyingTimer = 0;
@@ -68,25 +68,27 @@ export function advanceBossDeath(boss: BossHealth, delta: number) {
 }
 
 export function advanceProjectiles(
-  playerBullets: { x: number; y: number; vy: number; alive: boolean }[],
-  enemyBullets: { x: number; y: number; vx: number; vy: number; alive: boolean }[],
+  playerBullets: { x: number; y: number; vx?: number; vy: number; alive: boolean }[],
+  enemyBullets: { x: number; y: number; vx: number; vy: number; alive: boolean; frozenUntil?: number }[],
   delta: number,
   width: number,
   height: number,
 ) {
   for (const bullet of playerBullets) {
+    bullet.x += (bullet.vx ?? 0) * delta * .22;
     bullet.y += bullet.vy * delta * .22;
-    if (bullet.y < -20) bullet.alive = false;
+    if (bullet.y < -20 || bullet.x < -20 || bullet.x > width + 20) bullet.alive = false;
   }
   for (const bullet of enemyBullets) {
+    if (bullet.frozenUntil) continue;
     bullet.x += bullet.vx * delta * .26;
     bullet.y += bullet.vy * delta * .26;
     if (bullet.y > height + 20 || bullet.y < -20 || bullet.x < -20 || bullet.x > width + 20) bullet.alive = false;
   }
 }
 
-export function playerShotHitsTarget(bullet: { x: number; y: number }, target: { x: number; y: number; radius: number }) {
-  return Math.hypot(bullet.x - target.x, bullet.y - target.y) <= target.radius + 4;
+export function playerShotHitsTarget(bullet: { x: number; y: number; radius?: number }, target: { x: number; y: number; radius: number }) {
+  return Math.hypot(bullet.x - target.x, bullet.y - target.y) <= target.radius + (bullet.radius ?? 4);
 }
 
 export function enemyShotHitsPlayer(bullet: { x: number; y: number; radius?: number }, player: { x: number; y: number }, playerWidth: number, playerHeight: number) {
