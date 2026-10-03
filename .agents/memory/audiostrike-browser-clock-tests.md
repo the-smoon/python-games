@@ -18,3 +18,5 @@ Pause timing regressions should include temporary weapon effects, uncollected pi
 **Why:** Freezing movement and compensating only the stage timer can appear correct while combat deadlines expire or an active soundtrack keeps playing. Pauses must preserve remaining durations across the whole run.
 
 **How to apply:** Advance the coordinated browser clock beyond the duration of the effects while paused, compare combat and playback snapshots, then confirm the effects remain active and only the previously playing tracks resume.
+
+Isolate exact bomb-damage browser checks from player rounds already in flight. **Why:** the short pickup-acquisition window can include a pending automatic volley, making exact boss-health deltas flaky. **How to apply:** clear queued player shots in the development-only test fixture before simulating a bomb pickup; do not change production weapon behavior to mask test timing.

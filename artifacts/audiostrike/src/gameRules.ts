@@ -21,7 +21,7 @@ export function newestLivingBoss<T extends { health: number; phase: string }>(bo
 }
 
 /** Keep carried bosses distinguishable without changing their sizes or arrival animation. */
-export function separateBossPositions(bosses: { x: number; y: number; radius: number; phase: string }[], width: number) {
+export function separateBossPositions(bosses: readonly { x: number; y: number; radius: number; phase: string }[], width: number) {
   const active = bosses.filter((boss) => boss.phase !== 'INTRO' && boss.phase !== 'DYING');
   for (let pass = 0; pass < 6; pass++) {
     for (let i = 0; i < active.length; i++) for (let j = i + 1; j < active.length; j++) {
