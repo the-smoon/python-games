@@ -1,4 +1,46 @@
 export const STAGE_LEVEL_SECONDS = 30;
+export const BOSS_ENCOUNTER_SECONDS = 30;
+export type BossEncounter = { id: number; startedAt: number; advanced: boolean };
+
+/** Deadlines use the pause-adjusted gameplay clock, never an audio playhead. */
+export function encounterProgress(encounter: BossEncounter, now: number) {
+  const elapsed = Math.max(0, (now - encounter.startedAt) / 1000);
+  return { secondsLeft: Math.ceil(Math.max(0, BOSS_ENCOUNTER_SECONDS - elapsed)),
+    finished: elapsed >= BOSS_ENCOUNTER_SECONDS };
+}
+
+export function advanceEncounter(encounter: BossEncounter | null, now: number, defeatedId?: number) {
+  if (!encounter || encounter.advanced ||
+    (defeatedId !== encounter.id && !encounterProgress(encounter, now).finished)) return false;
+  encounter.advanced = true;
+  return true;
+}
+
+export function newestLivingBoss<T extends { health: number; phase: string }>(bosses: T[]): T | undefined {
+  return bosses.findLast((boss) => boss.health > 0 && boss.phase !== 'DYING');
+}
+
+/** Keep carried bosses distinguishable without changing their sizes or arrival animation. */
+export function separateBossPositions(bosses: { x: number; y: number; radius: number; phase: string }[], width: number) {
+  const active = bosses.filter((boss) => boss.phase !== 'INTRO' && boss.phase !== 'DYING');
+  for (let pass = 0; pass < 6; pass++) {
+    for (let i = 0; i < active.length; i++) for (let j = i + 1; j < active.length; j++) {
+      const a = active[i], b = active[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const distance = Math.hypot(dx, dy);
+      const spacing = a.radius + b.radius + 8;
+      if (distance >= spacing) continue;
+      const angle = distance > .001 ? Math.atan2(dy, dx) : (i + j) * 2.4;
+      const shift = (spacing - distance) / 2;
+      a.x -= Math.cos(angle) * shift; a.y -= Math.sin(angle) * shift;
+      b.x += Math.cos(angle) * shift; b.y += Math.sin(angle) * shift;
+      for (const boss of [a, b]) {
+        boss.x = clamp(boss.x, boss.radius + 15, width - boss.radius - 15);
+        boss.y = clamp(boss.y, boss.radius + 20, 320);
+      }
+    }
+  }
+}
 
 export const BOSS_TRANSITION_SECONDS = 5;
 export const BOSS_ARRIVAL_SECONDS = 5;

@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
 import { BOSS_ARRIVAL_SECONDS, STAGE_LEVEL_SECONDS } from '../src/gameRules.ts';
+import { audioIntensity, chooseAttack } from '../src/encounterRules.ts';
 
 const url = process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/';
 
@@ -52,7 +53,7 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
     await page.clock.fastForward((STAGE_LEVEL_SECONDS + 0.1) * 1000);
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'BOSS_INTRO');
     const transition = await snapshot();
-    assert.equal(transition.bossAudioPaused, false);
+    assert.equal(transition.bossAudioPaused, true, 'incoming boss is not audible until combat begins');
     assert.equal(transition.stageAudioPaused, false);
     await page.clock.runFor(2000);
     const midTransition = await snapshot();
@@ -73,9 +74,9 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
     const healthOnKill = (await snapshot()).playerHealth;
     await page.clock.runFor(600);
     const dying = await snapshot();
-    assert.equal(dying.state, 'BOSS');
+    assert.equal(dying.state, 'PLAYING', 'early defeat starts the next stage immediately');
     assert.equal(dying.subBossCount, 0, 'sub-bosses stop attacking on the killing blow');
-    assert.equal(dying.hostileShots, 0, 'incoming shots clear on the killing blow');
+    assert.equal(dying.damageProtected, true, 'death animation retains damage protection while enemies resume');
     assert.equal(dying.playerHealth, healthOnKill, 'the player cannot lose during boss death');
     await page.clock.runFor(2000);
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().level === 2);
@@ -86,7 +87,7 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
     assert.equal(secondStage.bossAudioSrc, firstStage.bossAudioSrc, 'the second song is reused');
     assert.equal(secondStage.stageAudioPaused, false);
     assert.equal(secondStage.bossAudioPaused, true);
-    assert.ok(secondStage.stageTime < 1, 'the stage timer restarts');
+    assert.ok(secondStage.stageTime < 3, 'the stage timer restarts on the killing blow, not animation completion');
     assert.ok(secondStage.playerHealth > 0, 'the player survives the level change');
     assert.notEqual(secondStage.starY, firstBoss.starY, 'the starfield continues across levels');
     assert.match(await page.getByTestId('text-level').innerText(), /Level\s*2/i);
@@ -101,4 +102,170 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
   } finally {
     await browser.close();
   }
+});
+
+test('timed encounters stack, preserve playlist ownership, pause, pickups, and independent deaths', { timeout: 90000 }, async () => {
+  const executablePath = process.env.CHROMIUM_PATH || execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim();
+  const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage({ viewport: { width: 412, height: 915 } });
+    const errors = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.clock.install();
+    await page.addInitScript(() => { window.__AUDIOSTRIKE_TEST_MODE__ = true; Math.random = () => .7; });
+    const jobId = '11111111-1111-4111-8111-111111111111';
+    const titles = ['A', 'B', 'C'];
+    await page.route('**/api/playlists**', async (route) => {
+      const request = route.request(), path = new URL(request.url()).pathname;
+      if (request.method() === 'DELETE') { await route.fulfill({ status: 204 }); return; }
+      if (path.includes('/tracks/')) {
+        await route.fulfill({ status: 200, contentType: 'audio/wav', body: toneWav([110, 1100, 3200][Number(path.split('/').pop())]) });
+        return;
+      }
+      await route.fulfill({ status: request.method() === 'POST' ? 202 : 200, json: {
+        id: jobId, state: 'ready', message: 'Ready', completed: 3, total: 3,
+        manifest: { version: 1, skipped: 0, tracks: titles.map((title, index) => ({
+          id: String(index), title, url: `/api/playlists/${jobId}/tracks/${index}`,
+        })) },
+      } });
+    });
+    await page.goto(url);
+    await page.getByTestId('button-source-playlist').click();
+    await page.getByTestId('input-playlist-url').fill('https://music.youtube.com/playlist?list=PL_Test');
+    await page.getByTestId('button-download-playlist').click();
+    await page.getByTestId('playlist-tracks').waitFor();
+    await page.getByTestId('button-analyze').click();
+    await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
+    const snapshot = () => page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot());
+    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ invincible: 1e9 }));
+    async function arrive() {
+      await page.clock.fastForward(30100);
+      assert.equal((await snapshot()).state, 'BOSS_INTRO');
+      await page.clock.runFor(5100);
+      assert.equal((await snapshot()).state, 'BOSS');
+      const boss = (await snapshot()).bosses.at(-1);
+      await page.evaluate((id) => window.__AUDIOSTRIKE_TEST__.setBossHealth(id, 1e6), boss.id);
+      return boss;
+    }
+    async function timeout() {
+      await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setEncounterElapsed(29.98));
+      await page.clock.runFor(10);
+      assert.equal((await snapshot()).state, 'BOSS', 'does not expire before exact deadline');
+      await page.clock.runFor(30);
+      assert.equal((await snapshot()).state, 'PLAYING');
+    }
+    const first = await arrive();
+    assert.equal((await snapshot()).encounter.secondsLeft, 30, 'timer begins after arrival');
+    assert.match(await page.getByTestId('text-boss-time').innerText(), /30s/);
+    await page.getByTestId('button-pause').click();
+    const frozen = await snapshot();
+    await page.clock.fastForward(90000);
+    assert.deepEqual(await snapshot(), frozen, 'pause freezes boss deadline and all entities');
+    await page.getByTestId('button-resume').click();
+    await page.clock.runFor(40);
+    await page.evaluate((id) => window.__AUDIOSTRIKE_TEST__.setAudioSpectrum(id, 'bass'), first.id);
+    await timeout();
+    const secondStage = await snapshot();
+    assert.equal(secondStage.level, 2);
+    assert.equal(secondStage.bosses.length, 1, 'timeout does not despawn boss');
+    assert.equal(secondStage.audibleBossId, first.id);
+    assert.equal(secondStage.audibleSrc, first.src, 'carried boss keeps its original song');
+    assert.equal(secondStage.stageTrackTitle, 'C'); assert.equal(secondStage.bossTrackTitle, 'A');
+    assert.ok(secondStage.enemies.some((enemy) => !enemy.subBoss), 'regular enemies spawn immediately');
+    assert.ok(secondStage.stageTime < .1);
+    await page.clock.runFor(100);
+    const bassEnemies = await snapshot();
+    assert.ok(bassEnemies.audibleFeatures.low > bassEnemies.audibleFeatures.high);
+    for (const enemy of bassEnemies.enemies.filter((enemy) => !enemy.subBoss)) {
+      assert.equal(enemy.pattern, chooseAttack(bassEnemies.audibleFeatures, Math.floor(enemy.frame)));
+    }
+    assert.ok(bassEnemies.bosses[0].x !== secondStage.bosses[0].x || bassEnemies.bosses[0].y !== secondStage.bosses[0].y, 'carried boss continues moving');
+    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.spawnTarget(80, 350, 12345, false, 8, 30));
+    const beforeMotion = (await snapshot()).enemies.find((enemy) => enemy.health === 12345);
+    await page.clock.runFor(20);
+    const moved = await snapshot(), afterMotion = moved.enemies.find((enemy) => enemy.health === 12345);
+    const expectedMovement = 8 * (afterMotion.frame - beforeMotion.frame) * .18 * (1 + audioIntensity(moved.audibleFeatures) * .3) * 2.3;
+    assert.ok(Math.abs(afterMotion.x - beforeMotion.x - expectedMovement) < .01, 'regular-enemy movement uses audible boss energy, not muted stage audio');
+    assert.equal(afterMotion.pattern, 'RADIAL', 'bass boss song selects radial regular-enemy fire');
+    assert.ok(moved.enemyShots.filter((shot) => !shot.ownerId && shot.kind === 'ORB').length >= 10, 'regular enemy actually emits the audible-song-selected radial volley');
+    const second = await arrive();
+    await page.evaluate((id) => window.__AUDIOSTRIKE_TEST__.setAudioSpectrum(id, 'bright'), second.id);
+    await page.clock.runFor(80);
+    const both = await snapshot();
+    assert.equal(both.bosses.length, 2);
+    assert.equal(both.audibleBossId, second.id);
+    assert.equal(both.bosses[0].paused, true); assert.equal(both.bosses[1].paused, false);
+    assert.ok(both.audibleFeatures.high > both.audibleFeatures.low);
+    // Defeating the current encounter advances immediately, before its death animation.
+    await page.evaluate((id) => window.__AUDIOSTRIKE_TEST__.finishBoss(id), second.id);
+    const early = await snapshot();
+    assert.equal(early.level, 3); assert.equal(early.state, 'PLAYING');
+    assert.equal(early.audibleBossId, first.id, 'older song resumes as newest living boss');
+    assert.equal(early.stageTrackTitle, 'B'); assert.equal(early.bossTrackTitle, 'C');
+    assert.equal(early.damageProtected, true);
+    await page.evaluate(() => {
+      const api = window.__AUDIOSTRIKE_TEST__;
+      api.setPlayer({ health: 50, invincible: 0 });
+      api.drop('REPAIR');
+      const p = api.snapshot().player;
+      api.enemyShot(p.x, p.y, 50);
+    });
+    await page.clock.runFor(40);
+    assert.equal((await snapshot()).playerHealth, 75, 'repair collects while death animation protects from damage');
+    const oldHealth = (await snapshot()).bosses[0].health;
+    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.drop('BOMB'));
+    await page.clock.runFor(40);
+    assert.equal((await snapshot()).bosses[0].health, oldHealth - 180, 'bomb damages living carried boss during another death');
+    assert.equal((await snapshot()).level, 3);
+    assert.equal((await snapshot()).damageProtected, true, 'bomb does not cancel transition protection');
+    for (const type of ['SHIELD', 'RAPID', 'SPREAD', 'SPREAD', 'LASER', 'TWIN']) {
+      await page.evaluate((type) => window.__AUDIOSTRIKE_TEST__.drop(type), type);
+      await page.clock.runFor(40);
+      assert.equal((await snapshot()).drops.length, 0, `${type} pickup collects during death animation`);
+    }
+    assert.equal((await snapshot()).weapon.type, 'TWIN');
+    assert.ok((await snapshot()).weapon.shieldUntil > (await snapshot()).now);
+    assert.ok((await snapshot()).weapon.rapidUntil > (await snapshot()).now);
+    assert.ok((await snapshot()).bosses.some((boss) => boss.id === second.id && boss.phase === 'DYING'));
+    await page.clock.runFor(2600);
+    assert.equal((await snapshot()).bosses.length, 1, 'only the individually finished death is removed');
+    assert.equal((await snapshot()).level, 3, 'animation completion cannot advance again');
+    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ invincible: 1e9 }));
+    const third = await arrive();
+    await timeout();
+    assert.equal((await snapshot()).level, 4);
+    const fourth = await arrive();
+    await page.clock.runFor(3000);
+    assert.equal((await snapshot()).bosses.length, 3, 'survival supports more than two simultaneous bosses');
+    assert.equal((await snapshot()).audibleBossId, fourth.id);
+    const visibleBosses = (await snapshot()).bosses;
+    for (let i = 0; i < visibleBosses.length; i++) for (let j = i + 1; j < visibleBosses.length; j++) {
+      assert.ok(Math.hypot(visibleBosses[i].x - visibleBosses[j].x, visibleBosses[i].y - visibleBosses[j].y) > 100, 'stacked bosses remain individually visible');
+    }
+    const hud = await page.getByTestId('hud-bosses').boundingBox();
+    assert.ok(hud.x >= 0 && hud.x + hud.width <= 412, 'multi-boss HUD fits portrait viewport');
+    await page.screenshot({ path: '/tmp/audiostrike-stacked-bosses-portrait.png' });
+    await page.evaluate((id) => window.__AUDIOSTRIKE_TEST__.finishBoss(id), first.id);
+    assert.equal((await snapshot()).level, 4, 'older carry-over defeat never advances current encounter');
+    assert.equal((await snapshot()).audibleBossId, fourth.id);
+    await page.clock.runFor(2600);
+    assert.deepEqual((await snapshot()).bosses.map((boss) => boss.id), [third.id, fourth.id]);
+    await page.evaluate((id) => {
+      window.__AUDIOSTRIKE_TEST__.setEncounterElapsed(30);
+      window.__AUDIOSTRIKE_TEST__.finishBoss(id);
+    }, fourth.id);
+    await page.clock.runFor(40);
+    assert.equal((await snapshot()).level, 5, 'defeat exactly at timeout advances only once');
+    assert.equal((await snapshot()).audibleBossId, third.id);
+    await page.evaluate((id) => window.__AUDIOSTRIKE_TEST__.finishBoss(id), third.id);
+    assert.equal((await snapshot()).level, 5);
+    assert.equal((await snapshot()).audibleBossId, null);
+    assert.equal((await snapshot()).stageAudioPaused, false, 'stage song resumes once no living bosses remain');
+    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.endRun());
+    await page.getByTestId('button-replay-game-over').click();
+    const replay = await snapshot();
+    assert.equal(replay.level, 1); assert.deepEqual(replay.bosses, []); assert.equal(replay.encounter, null);
+    assert.deepEqual(replay.trackOrder, titles);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
 });

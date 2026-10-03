@@ -4,8 +4,53 @@ import {
   advanceBossDeath, advanceProjectiles, attackInterval, attackVectors, bossPhase, BOSS_TRANSITION_SECONDS, configureGameplayAudio, detachSubBoss, encounterSignature, nextLevel,
   damageBoss, enemyShotHitsPlayer, moveBoss, playerShotHitsTarget,
   spawnPressure, stageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS,
+  BOSS_ENCOUNTER_SECONDS, advanceEncounter, encounterProgress, newestLivingBoss, separateBossPositions,
 } from '../src/gameRules.ts';
 import { bossHealth } from '../src/encounterRules.ts';
+
+test('encounters advance exactly once on early defeat or exact gameplay timeout', () => {
+  assert.equal(BOSS_ENCOUNTER_SECONDS, 30);
+  const early = { id: 1, startedAt: 5000, advanced: false };
+  assert.equal(advanceEncounter(early, 10000, 99), false, 'older deaths cannot advance');
+  assert.equal(advanceEncounter(early, 10000, 1), true);
+  assert.equal(advanceEncounter(early, 35000, 1), false, 'timeout and defeat cannot advance twice');
+  const timeout = { id: 2, startedAt: 60000, advanced: false };
+  assert.deepEqual(encounterProgress(timeout, 60000), { secondsLeft: 30, finished: false });
+  assert.equal(advanceEncounter(timeout, 89999), false);
+  assert.equal(advanceEncounter(timeout, 90000), true);
+  assert.equal(advanceEncounter(timeout, 90000, 2), false);
+  const next = { id: 3, startedAt: 100000, advanced: false };
+  assert.equal(advanceEncounter(next, 100001, 2), false, 'late carry-over death does not skip a level');
+});
+
+test('soundtrack priority follows newest living boss, not scheduling or death animations', () => {
+  const bosses = [1, 2, 3, 4].map((id) => ({ id, health: 100, phase: 'PHASE1' }));
+  assert.equal(newestLivingBoss(bosses).id, 4);
+  bosses[3].phase = 'DYING'; bosses[3].health = 0;
+  assert.equal(newestLivingBoss(bosses).id, 3);
+  bosses[1].health = 0;
+  assert.equal(newestLivingBoss(bosses).id, 3);
+  bosses[2].health = 0;
+  assert.equal(newestLivingBoss(bosses).id, 1);
+  bosses[0].health = 0;
+  assert.equal(newestLivingBoss(bosses), undefined);
+});
+
+test('stacked bosses separate visibly without moving incoming or dying bosses', () => {
+  const bosses = Array.from({ length: 3 }, () => ({ x: 210, y: 120, radius: 55, phase: 'PHASE1' }));
+  const arrival = { x: 210, y: -35, radius: 55, phase: 'INTRO' };
+  const dying = { x: 210, y: 120, radius: 55, phase: 'DYING' };
+  bosses.push(arrival, dying);
+  separateBossPositions(bosses, 420);
+  assert.equal(bosses.length, 5);
+  for (let i = 0; i < 3; i++) {
+    assert.ok(bosses[i].x >= 70 && bosses[i].x <= 350);
+    assert.ok(bosses[i].y >= 75 && bosses[i].y <= 320);
+    for (let j = i + 1; j < 3; j++) assert.ok(Math.hypot(bosses[i].x - bosses[j].x, bosses[i].y - bosses[j].y) > 108);
+  }
+  assert.equal(arrival.y, -35);
+  assert.deepEqual(dying, { x: 210, y: 120, radius: 55, phase: 'DYING' });
+});
 
 test('stage runs for 30 seconds regardless of track duration, followed by five seconds before entry', () => {
   assert.equal(STAGE_LEVEL_SECONDS, 30);

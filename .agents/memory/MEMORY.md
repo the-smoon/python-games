@@ -8,3 +8,4 @@
 - [Weapon switching tradeoffs](audiostrike-weapon-intent.md) — rank loss is intentional; wingmen alone are destructible upgrades, and freeze stays distinct from screen-clearing bombs.
 - [Playlist intent](audiostrike-playlist-intent.md) — the supplied downloader may be adapted; odd playlists pair continuously and replay retains the once-shuffled order.
 - [API codegen compatibility](api-codegen-compatibility.md) — formatted validators must match the installed Zod major version, not the generator's assumed default.
+- [Boss survival intent](audiostrike-boss-survival-intent.md) — surviving bosses must not delay scheduled arrivals; newest living boss owns the shared soundtrack.

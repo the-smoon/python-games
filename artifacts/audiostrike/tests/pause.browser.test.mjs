@@ -98,7 +98,7 @@ test('touch and keyboard pause preserve stage, crossfade, boss, and weapon timin
     await page.getByTestId('button-resume').tap();
     await page.waitForFunction(() => {
       const s = window.__AUDIOSTRIKE_TEST__.snapshot();
-      return !s.stageAudioPaused && !s.bossAudioPaused;
+      return !s.stageAudioPaused && s.bossAudioPaused;
     });
     await page.clock.runFor(BOSS_ARRIVAL_SECONDS * 1000 + 100);
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__.snapshot().state === 'BOSS');
