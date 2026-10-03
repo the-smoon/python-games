@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advancePickup, bombDamage, collectPickup, companionPositions, fireWeapon, freezeSplash, laserHitsTarget,
-  newWeaponState, pickDrop, slowScale, tickFrozenBullet, weaponStats, WEAPON_BALANCE } from '../src/weaponRules.ts';
+import { advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, enemyDropChance,
+  fireWeapon, freezeSplash, laserHitsTarget, newWeaponState, pickDrop, slowScale, tickFrozenBullet,
+  weaponStats, WEAPON_BALANCE } from '../src/weaponRules.ts';
 import { advanceProjectiles, damageBoss } from '../src/gameRules.ts';
 
 const player = { x: 210, y: 450, vx: 0, vy: 0 };
@@ -72,6 +73,18 @@ test('laser line intersects all aligned targets, not targets beside or below it'
   assert.equal(laserHitsTarget(beam, { x: 240, y: 300, radius: 18 }), false);
   assert.equal(laserHitsTarget(beam, { x: 210, y: 470, radius: 18 }), false);
 });
+test('laser sweeps clear only live hostile bullets that cross the beam', () => {
+  const beam = { x: 210, y: 432, width: 6, damage: 95, until: 1 };
+  const bullets = [
+    { x: 214, y: 100, radius: 4, alive: true },
+    { x: 218, y: 100, radius: 4, alive: true },
+    { x: 210, y: 439, radius: 4, alive: true },
+    { x: 210, y: 200, radius: 4, alive: false },
+  ];
+  const cleared = clearLaserHits(beam, bullets);
+  assert.deepEqual(cleared, [bullets[0]]);
+  assert.deepEqual(bullets.map((bullet) => bullet.alive), [false, true, true, false]);
+});
 test('freeze stays local for exactly three seconds; bullets pop, enemies recover without changing base stats', () => {
   const enemies = [{ x: 100, y: 100, radius: 10, speed: 4 }, { x: 200, y: 100, radius: 10, speed: 4 }];
   const shots = [{ x: 100, y: 110, vx: 10, vy: 10, radius: 4, alive: true },
@@ -117,4 +130,18 @@ test('bomb destroys weak regular enemies but a healthy tougher enemy survives', 
   const tougher = { maxHealth: 22, subBoss: false };
   assert.ok(bombDamage(tougher) < tougher.maxHealth);
   assert.equal(bombDamage({ maxHealth: 50, subBoss: true }), 25);
+});
+test('ordinary item drops are much rarer, scale with enemy strength, and pity no longer restores the old rate', () => {
+  const weak = enemyDropChance({ maxHealth: 1, subBoss: false });
+  const strong = enemyDropChance({ maxHealth: 22, subBoss: false });
+  assert.ok(weak > 0 && weak < strong);
+  assert.ok(Math.abs(strong - .11) < 1e-12);
+  assert.equal(enemyDropChance({ maxHealth: 22, subBoss: true }), .25);
+  assert.equal(WEAPON_BALANCE.bossDropChance, .5);
+  const effectiveRate = (chance, failures) =>
+    chance / (1 - (1 - chance) ** (failures + 1));
+  const formerEffectiveRate = effectiveRate(.24, 8);
+  const tunedEffectiveRate = effectiveRate(strong, WEAPON_BALANCE.dropPity);
+  assert.ok(tunedEffectiveRate <= formerEffectiveRate / 2,
+    'even the strongest ordinary enemies produce at most half the former effective drop rate');
 });

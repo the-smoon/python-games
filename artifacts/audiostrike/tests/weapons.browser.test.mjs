@@ -27,6 +27,11 @@ test('real pickups drive ranked weapons, shield, companions, freeze, piercing la
     await page.getByTestId('button-analyze').click();
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
     const snap = () => page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot());
+    const preMatch = await snap();
+    assert.equal(preMatch.stageAnalysis.analyzed, true, 'stage song was decoded before the match');
+    assert.equal(preMatch.bossAnalysis.analyzed, true, 'boss song was decoded before the match');
+    assert.equal(preMatch.stageAnalysis.motifCount, 8);
+    assert.equal(preMatch.bossAnalysis.motifCount, 8);
     const run = (fn, arg) => page.evaluate(fn, arg);
     const tick = (ms = 40) => page.clock.runFor(ms);
     const pickup = async (type) => {
@@ -112,11 +117,14 @@ test('real pickups drive ranked weapons, shield, companions, freeze, piercing la
       const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
       api.clearArena(); api.spawnTarget(p.x, 200, 1000); api.spawnTarget(p.x, 300, 1000);
       api.spawnTarget(p.x - 80, 250, 1000);
+      api.enemyShot(p.x + 4, 100, 3);
+      api.enemyShot(p.x + 20, 100, 3);
     });
     await tick(550);
     const lased = await snap();
     assert.equal(lased.enemies[0].health, 905); assert.equal(lased.enemies[1].health, 905);
     assert.equal(lased.enemies[2].health, 1000);
+    assert.equal(lased.hostileShots, 1, 'laser clears the aligned hostile bullet and leaves the off-axis bullet');
     const cooling = lased.weapon.cooldownUntil;
     assert.ok(cooling > lased.now);
     await tick(100);

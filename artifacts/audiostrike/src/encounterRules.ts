@@ -12,6 +12,7 @@ export type AudioSignals = {
 
 export type AttackPattern = 'TRACK' | 'BURST' | 'RADIAL' | 'SPIRAL' | 'WAVE';
 export type MotionPattern = 'ORBIT' | 'SWEEP' | 'CHASE' | 'DASH' | 'ZIGZAG';
+export type ShapeIdentity = 'CIRCLE' | 'DIAMOND' | 'TRIANGLE' | 'HEX' | 'RING';
 
 export type FormProfile = {
   sides: number;
@@ -118,7 +119,36 @@ export function chooseAttack(signal: AudioSignals, serial: number): AttackPatter
 
 const MOTIONS: readonly MotionPattern[] = ['ORBIT', 'SWEEP', 'CHASE', 'DASH', 'ZIGZAG'];
 
-export function chooseMotion(signal: AudioSignals, serial: number): MotionPattern {
+const SHAPE_MOTION_BIAS: Record<ShapeIdentity, Partial<Record<MotionPattern, number>>> = {
+  CIRCLE: { CHASE: .32, SWEEP: .12 },
+  DIAMOND: { SWEEP: .3, ORBIT: .12 },
+  TRIANGLE: { DASH: .34, CHASE: .13 },
+  HEX: { SWEEP: .3, ORBIT: .18 },
+  RING: { ORBIT: .34, ZIGZAG: .14 },
+};
+
+export function blendAudioSignals(structure: AudioSignals, live: AudioSignals, liveWeight = .34): AudioSignals {
+  const weight = clamp(liveWeight, 0, 1);
+  const blend = (key: Exclude<keyof AudioSignals, 'pulse' | 'tempo'>) =>
+    clamp(structure[key] * (1 - weight) + live[key] * weight, 0, 1);
+  return {
+    rms: blend('rms'), onset: blend('onset'), low: blend('low'), mid: blend('mid'),
+    high: blend('high'), centroid: blend('centroid'), flatness: blend('flatness'),
+    pulse: live.pulse,
+    tempo: Math.round(structure.tempo * (1 - weight) + live.tempo * weight),
+  };
+}
+
+export function varyShapeIdentity(base: ShapeIdentity, variant: number): ShapeIdentity {
+  const shapes: readonly ShapeIdentity[] = ['CIRCLE', 'DIAMOND', 'TRIANGLE', 'HEX', 'RING'];
+  const index = Math.max(0, Number.isFinite(variant) ? Math.trunc(variant) : 0);
+  const baseIndex = Math.max(0, shapes.indexOf(base));
+  return shapes[(baseIndex + index) % shapes.length];
+}
+
+export function chooseMotion(
+  signal: AudioSignals, serial: number, identity?: ShapeIdentity, musicStyle?: MotionPattern | 'HUNT',
+): MotionPattern {
   const low = signalValue(signal, 'low');
   const mid = signalValue(signal, 'mid');
   const high = signalValue(signal, 'high');
@@ -127,13 +157,23 @@ export function chooseMotion(signal: AudioSignals, serial: number): MotionPatter
   const onset = signalValue(signal, 'onset');
   const tempo = tempoIntensity(signal.tempo);
   const pulse = signal.pulse ? 1 : 0;
-  return selectPattern([
+  const scores = [
     low * 0.55 + mid * 0.25 + (1 - onset) * 0.2,
     mid * 0.35 + high * 0.4 + centroid * 0.25,
     low * 0.35 + mid * 0.35 + signalValue(signal, 'rms') * 0.3,
     onset * 0.65 + pulse * 0.25 + tempo * 0.55 + mid * 0.3,
     high * 0.6 + centroid * 0.35 + flatness * 0.3,
-  ], MOTIONS, serial);
+  ];
+  if (identity) {
+    const bias = SHAPE_MOTION_BIAS[identity];
+    MOTIONS.forEach((motion, index) => { scores[index] += bias[motion] ?? 0; });
+  }
+  const preferredMotion = musicStyle === 'HUNT' ? 'CHASE' : musicStyle;
+  if (preferredMotion) {
+    const index = MOTIONS.indexOf(preferredMotion);
+    if (index >= 0) scores[index] += .16;
+  }
+  return selectPattern(scores, MOTIONS, serial);
 }
 
 export function bossHealth(duration: number, level: number): number {

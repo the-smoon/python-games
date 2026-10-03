@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   audioIntensity,
+  blendAudioSignals,
   bossHealth,
   chooseAttack,
   chooseMotion,
   generateForm,
   spawnProfile,
+  varyShapeIdentity,
 } from '../src/encounterRules.ts';
 
 const quiet = {
@@ -81,6 +83,19 @@ test('attack and motion selection is deterministic and responsive to audio quali
     assert.equal(chooseAttack(signals[index], index), attacks[index]);
     assert.equal(chooseMotion(signals[index], index), motions[index]);
   }
+});
+
+test('shape identity and pre-match movement preference bias motion without replacing live rhythm', () => {
+  assert.equal(chooseMotion(quiet, 4, 'TRIANGLE', 'DASH'), 'DASH');
+  assert.equal(chooseMotion(quiet, 4, 'RING', 'ORBIT'), 'ORBIT');
+  assert.deepEqual(['CIRCLE', 'DIAMOND', 'TRIANGLE', 'HEX', 'RING']
+    .map((shape, index) => varyShapeIdentity(shape, 1)),
+  ['DIAMOND', 'TRIANGLE', 'HEX', 'RING', 'CIRCLE']);
+
+  const mixed = blendAudioSignals(quiet, energetic, .25);
+  assert.equal(mixed.pulse, true, 'live pulses stay immediate');
+  assert.ok(mixed.rms > quiet.rms && mixed.rms < energetic.rms, 'song structure remains the stronger baseline');
+  assert.ok(mixed.tempo > quiet.tempo && mixed.tempo < energetic.tempo);
 });
 
 test('boss health is half the level-one baseline, then increases with bounded level scaling', () => {

@@ -6,7 +6,8 @@ export const WEAPON_BALANCE = {
   companionHP: 20, companionOffset: 33,
   freezeSeconds: 3, freezeRadius: 48, slowMultiplier: .4,
   stoppedSpeed: .08, maxBullets: 320,
-  dropChance: .24, subBossDropChance: .8, dropPity: 8,
+  weakEnemyDropChance: .025, strongEnemyDropBonus: .085, subBossDropChance: .25,
+  bossDropChance: .5, maxEnemyHealthForDropScaling: 22, dropPity: 24,
   maxDrops: 10, dropSeconds: 12, dropSpeed: 55,
   bombWeakHealth: 8, bombEnemyDamage: 25, bombStrongHealthFraction: .55, bombBossDamage: 180,
 };
@@ -116,6 +117,18 @@ export function laserHitsTarget(beam: LaserBeam, target: { x: number; y: number;
   return target.y + target.radius >= 0 && target.y - target.radius <= beam.y &&
     Math.abs(target.x - beam.x) <= target.radius + beam.width / 2;
 }
+export function clearLaserHits<T extends { x: number; y: number; radius: number; alive: boolean }>(
+  beam: LaserBeam, bullets: T[],
+) {
+  const cleared: T[] = [];
+  for (const bullet of bullets) {
+    if (bullet.alive && laserHitsTarget(beam, bullet)) {
+      bullet.alive = false;
+      cleared.push(bullet);
+    }
+  }
+  return cleared;
+}
 export function freezeSplash(x: number, y: number, enemies: FreezeTarget[], bullets: FreezeTarget[], now: number) {
   for (const target of [...enemies, ...bullets]) {
     if (target.alive !== false && Math.hypot(target.x - x, target.y - y) <= WEAPON_BALANCE.freezeRadius + target.radius) {
@@ -147,6 +160,12 @@ export function pickDrop(roll: number): PickupType {
     if (cursor < 0) return type;
   }
   return 'BOMB';
+}
+export function enemyDropChance(enemy: { maxHealth: number; subBoss: boolean }) {
+  if (enemy.subBoss) return WEAPON_BALANCE.subBossDropChance;
+  const strength = Math.max(0, Math.min(1,
+    (enemy.maxHealth - 1) / (WEAPON_BALANCE.maxEnemyHealthForDropScaling - 1)));
+  return WEAPON_BALANCE.weakEnemyDropChance + WEAPON_BALANCE.strongEnemyDropBonus * strength;
 }
 export function advancePickup(pickup: Pickup, player: { x: number; y: number }, now: number, seconds: number, height: number) {
   if (!pickup.alive) return false;
