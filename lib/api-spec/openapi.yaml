@@ -11,6 +11,81 @@ tags:
   - name: health
     description: Health operations
 paths:
+  /playlists:
+    post:
+      operationId: preparePlaylist
+      summary: Download a bounded public YouTube Music playlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaylistInput"
+      responses:
+        "202":
+          description: Download job started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaylistJob"
+        default:
+          $ref: "#/components/responses/PlaylistError"
+  /playlists/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^[a-f0-9-]{36}$"
+    get:
+      operationId: getPlaylist
+      summary: Read download progress and the ordered manifest
+      responses:
+        "200":
+          description: Playlist job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaylistJob"
+        default:
+          $ref: "#/components/responses/PlaylistError"
+    delete:
+      operationId: deletePlaylist
+      summary: Cancel a download and remove temporary files
+      responses:
+        "204":
+          description: Playlist removed
+        default:
+          $ref: "#/components/responses/PlaylistError"
+  /playlists/{id}/tracks/{index}:
+    get:
+      operationId: getPlaylistTrack
+      summary: Retrieve a downloaded MP3 using a manifest index
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: "^[a-f0-9-]{36}$"
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 19
+      responses:
+        "200":
+          description: MP3 file, up to 24 MB
+          content:
+            audio/mpeg:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: "#/components/responses/PlaylistError"
   /healthz:
     get:
       operationId: healthCheck
@@ -25,7 +100,79 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
 components:
+  responses:
+    PlaylistError:
+      description: Invalid request, rate limit, expired job, or preparation failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/PlaylistProblem"
   schemas:
+    PlaylistInput:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url:
+          type: string
+          maxLength: 512
+          description: Public HTTPS YouTube Music or YouTube playlist URL
+    PlaylistProblem:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    PlaylistTrack:
+      type: object
+      required: [id, title, url]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          maxLength: 200
+        url:
+          type: string
+    PlaylistManifest:
+      type: object
+      required: [version, skipped, tracks]
+      properties:
+        version:
+          type: integer
+          enum: [1]
+        skipped:
+          type: integer
+          minimum: 0
+          maximum: 20
+        tracks:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/PlaylistTrack"
+    PlaylistJob:
+      type: object
+      required: [id, state, message, completed, total]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-f0-9-]{36}$"
+        state:
+          type: string
+          enum: [downloading, ready, error]
+        message:
+          type: string
+        completed:
+          type: integer
+          minimum: 0
+          maximum: 20
+        total:
+          type: integer
+          minimum: 0
+          maximum: 20
+        manifest:
+          $ref: "#/components/schemas/PlaylistManifest"
     HealthStatus:
       type: object
       properties:

@@ -8,8 +8,8 @@
     "build": "vite build --config vite.config.ts",
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test tests/gameRules.test.mjs tests/gamepadControls.test.mjs tests/encounterRules.test.mjs tests/weaponRules.test.mjs tests/musicAnalysis.test.mjs",
-    "test:browser": "node --test --test-concurrency=1 tests/gamepad.browser.test.mjs tests/levelLoop.browser.test.mjs tests/weapons.browser.test.mjs tests/pause.browser.test.mjs"
+    "test": "node --test tests/gameRules.test.mjs tests/gamepadControls.test.mjs tests/encounterRules.test.mjs tests/weaponRules.test.mjs tests/musicAnalysis.test.mjs tests/playlistRules.test.mjs",
+    "test:browser": "node --test --test-concurrency=1 tests/gamepad.browser.test.mjs tests/levelLoop.browser.test.mjs tests/weapons.browser.test.mjs tests/pause.browser.test.mjs tests/playlist.browser.test.mjs"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

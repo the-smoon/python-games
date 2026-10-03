@@ -7,6 +7,8 @@ import { advancePickup, bombDamage, clearLaserHits, collectPickup, companionPosi
 import WeaponHUD from './WeaponHUD';
 import { drawFrozenHalo, drawWeaponEffects } from './weaponVisuals';
 import { analyzeMusic, type AudioFingerprint } from './musicAnalysis';
+import PlaylistSetup from './PlaylistSetup';
+import { levelPair, shuffleTracks, uploadedManifest, type LocalTrack } from './playlistRules';
 
 type GameState = 'UPLOAD' | 'ANALYZING' | 'COUNTDOWN' | 'PLAYING' | 'BOSS_INTRO' | 'BOSS' | 'GAME_OVER';
 type Behavior = 'PATROL' | 'ZIGZAG' | 'FORMATION' | 'SWARM' | 'DIVE' | 'SHOOTER' | 'TANK';
@@ -497,6 +499,11 @@ function Home() {
   }, []);
   const [stageFile, setStageFile] = useState<File | null>(null);
   const [bossFile, setBossFile] = useState<File | null>(null);
+  const [sourceMode, setSourceMode] = useState<'files' | 'playlist'>('files');
+  const [playlistTracks, setPlaylistTracks] = useState<LocalTrack[]>([]);
+  const [randomOrder, setRandomOrder] = useState(false);
+  const [playlistBusy, setPlaylistBusy] = useState(false);
+  const preparedRef = useRef<(LocalTrack & { url: string; features: FeatureSet })[]>([]);
   const [stageProgress, setStageProgress] = useState(0);
   const [bossProgress, setBossProgress] = useState(0);
   const [analysisMessage, setAnalysisMessage] = useState('Waiting for stage track');
@@ -521,13 +528,27 @@ function Home() {
     gameRef.current.stageReactive?.analyser.disconnect();
     gameRef.current.bossReactive?.analyser.disconnect();
     if (gameRef.current.audioContext) void gameRef.current.audioContext.close();
-    if (stageAudioRef.current) URL.revokeObjectURL(stageAudioRef.current.src);
-    if (bossAudioRef.current) URL.revokeObjectURL(bossAudioRef.current.src);
+    for (const track of preparedRef.current) URL.revokeObjectURL(track.url);
+    preparedRef.current = [];
     stageAudioRef.current = null;
     bossAudioRef.current = null;
     gameRef.current.audioContext = null;
     gameRef.current.stageReactive = null;
     gameRef.current.bossReactive = null;
+  }, []);
+
+  const loadLevelTracks = useCallback((level: number) => {
+    if (!preparedRef.current.length) return;
+    const pair = levelPair(preparedRef.current, level);
+    const game = gameRef.current;
+    stageAudioRef.current?.pause(); bossAudioRef.current?.pause();
+    if (stageAudioRef.current && bossAudioRef.current) {
+      if (stageAudioRef.current.src !== pair.stage.url) stageAudioRef.current.src = pair.stage.url;
+      if (bossAudioRef.current.src !== pair.boss.url) bossAudioRef.current.src = pair.boss.url;
+      stageAudioRef.current.currentTime = 0; bossAudioRef.current.currentTime = 0;
+    }
+    game.stageFeatures = pair.stage.features; game.bossFeatures = pair.boss.features;
+    resetReactiveTrack(game.stageReactive); resetReactiveTrack(game.bossReactive);
   }, []);
 
   const playTrack = useCallback((element: HTMLAudioElement, name: string) => {
@@ -582,62 +603,61 @@ function Home() {
   }, [togglePause]);
 
   const startAnalysis = useCallback(async () => {
-    if (!stageFile || !bossFile) return;
+    const manifest = sourceMode === 'playlist'
+      ? { version: 1 as const, tracks: playlistTracks }
+      : stageFile && bossFile ? uploadedManifest(stageFile, bossFile) : null;
+    if (!manifest?.tracks.length || playlistBusy) return;
     syncState('ANALYZING');
     setMusicWarning('');
     setAnalysisProgress(2);
     setAnalysisMessage('Reading stage metadata');
+    resetAudio();
     try {
-      const stageFeatures = await inspectAudio(stageFile, (value) => {
-        setStageProgress(value);
-        setAnalysisProgress(Math.round(value * .43));
-        setAnalysisMessage(value < 35 ? 'Decoding stage song' : value < 75 ? 'Mapping rhythm and sound profile' : 'Designing stage enemy families');
-      });
-      setAnalysisMessage('Pre-analyzing boss song for its encounter design');
-      const bossFeatures = await inspectAudio(bossFile, (value) => {
-        setBossProgress(value);
-        setAnalysisProgress(43 + Math.round(value * .57));
-        setAnalysisMessage(value < 35 ? 'Decoding boss song' : value < 75 ? 'Mapping rhythm and sound profile' : 'Designing boss and sub-boss families');
-      });
-      if (!stageFeatures.analyzed || !bossFeatures.analyzed) {
+      const ordered = sourceMode === 'playlist' && randomOrder ? shuffleTracks(manifest.tracks) : manifest.tracks;
+      for (let index = 0; index < ordered.length; index++) {
+        const track = ordered[index];
+        setAnalysisMessage(`Mapping track ${index + 1}/${ordered.length}: ${track.title}`);
+        const features = await inspectAudio(track.file, (value) => {
+          if (index % 2 === 0) setStageProgress(value); else setBossProgress(value);
+          setAnalysisProgress(Math.round((index + value / 100) / ordered.length * 100));
+        });
+        preparedRef.current.push({ ...track, features, url: URL.createObjectURL(track.file) });
+      }
+      if (preparedRef.current.some((track) => !track.features.analyzed)) {
         setMusicWarning('A track could not be pre-analyzed. Live audio will still guide combat where available.');
       }
       const game = gameRef.current;
-      game.stageFeatures = stageFeatures;
-      game.bossFeatures = bossFeatures;
-      resetAudio();
+      stageAudioRef.current = new Audio();
+      bossAudioRef.current = new Audio();
+      loadLevelTracks(1);
+      configureGameplayAudio(stageAudioRef.current, bossAudioRef.current);
       const AudioContextConstructor = window.AudioContext;
-      if (!AudioContextConstructor) throw new Error('Web Audio is not supported');
-      const audioContext = new AudioContextConstructor();
-      stageAudioRef.current = new Audio(URL.createObjectURL(stageFile));
-      bossAudioRef.current = new Audio(URL.createObjectURL(bossFile));
       stageAudioRef.current.preload = 'auto';
       bossAudioRef.current.preload = 'auto';
-      configureGameplayAudio(stageAudioRef.current, bossAudioRef.current);
       stageAudioRef.current.volume = .72;
       bossAudioRef.current.volume = .72;
-      game.audioContext = audioContext;
-      game.stageReactive = createReactiveTrack(audioContext, stageAudioRef.current);
-      game.bossReactive = createReactiveTrack(audioContext, bossAudioRef.current);
-      await audioContext.resume();
+      try {
+        if (!AudioContextConstructor) throw new Error('Web Audio is not supported');
+        const audioContext = new AudioContextConstructor();
+        game.audioContext = audioContext;
+        game.stageReactive = createReactiveTrack(audioContext, stageAudioRef.current);
+        game.bossReactive = createReactiveTrack(audioContext, bossAudioRef.current);
+        await audioContext.resume();
+      } catch {
+        setMusicWarning('Live sound analysis is unavailable; the pre-match music map will still guide enemy designs.');
+      }
       beginCountdown();
-    } catch {
-      setAnalysisMessage('Live audio scan unavailable — using safe fallback');
-      setMusicWarning('Live sound analysis is unavailable; the pre-match music map will still guide enemy designs.');
-      const game = gameRef.current;
-      game.stageFeatures ??= fallbackFeatures(42);
-      game.bossFeatures ??= fallbackFeatures(28);
+    } catch (error) {
       resetAudio();
-      stageAudioRef.current = new Audio(URL.createObjectURL(stageFile));
-      bossAudioRef.current = new Audio(URL.createObjectURL(bossFile));
-      configureGameplayAudio(stageAudioRef.current, bossAudioRef.current);
-      beginCountdown();
+      setMusicWarning(error instanceof Error ? error.message : 'Track preparation failed. Try again.');
+      syncState('UPLOAD');
     }
-  }, [bossFile, resetAudio, stageFile, syncState]);
+  }, [bossFile, resetAudio, stageFile, syncState, sourceMode, playlistTracks, playlistBusy, randomOrder, loadLevelTracks]);
 
   const beginCountdown = useCallback(() => {
     const game = gameRef.current;
     game.level = 1;
+    loadLevelTracks(1);
     arsenalRef.current = { weapon: newWeaponState(), drops: [], beam: null, splashes: [],
       bombUntil: 0, message: '', messageUntil: 0, dropMisses: 0 };
     setCombatHud({ weapon: newWeaponState(), now: 0, message: '', messageUntil: 0 });
@@ -661,18 +681,7 @@ function Home() {
       playTrack(stageAudioRef.current, 'Stage track');
     }
     syncState('COUNTDOWN');
-  }, [playTrack, resumeAudio, syncState]);
-
-  useEffect(() => {
-    const stageInput = stageInputRef.current;
-    const bossInput = bossInputRef.current;
-    if (!stageInput || !bossInput) return;
-    const onStage = () => setStageFile(stageInput.files?.[0] ?? null);
-    const onBoss = () => setBossFile(bossInput.files?.[0] ?? null);
-    stageInput.addEventListener('change', onStage);
-    bossInput.addEventListener('change', onBoss);
-    return () => { stageInput.removeEventListener('change', onStage); bossInput.removeEventListener('change', onBoss); };
-  }, []);
+  }, [playTrack, resumeAudio, syncState, loadLevelTracks]);
 
   useEffect(() => {
     const updateControllerStatus = () => {
@@ -881,6 +890,7 @@ function Home() {
     const beginNextLevel = () => {
       const game = gameRef.current;
       game.level = nextLevel(game.level);
+      loadLevelTracks(game.level);
       game.stageDone = false;
       game.spawnCooldown = 0;
       game.enemies = []; game.enemyBullets = []; game.bullets = []; game.boss = null;
@@ -1349,6 +1359,9 @@ function Home() {
               analyzedSeconds: game.bossFeatures.analyzedSeconds, motifCount: game.bossFeatures.motifs.length } : null,
             stageTime: (gameNow() - game.songStart) / 1000,
             stageAudioTime: stageAudioRef.current?.currentTime, stageAudioPaused: stageAudioRef.current?.paused, stageAudioSrc: stageAudioRef.current?.src,
+            trackOrder: preparedRef.current.map((track) => track.title),
+            stageTrackTitle: preparedRef.current.length ? levelPair(preparedRef.current, game.level).stage.title : null,
+            bossTrackTitle: preparedRef.current.length ? levelPair(preparedRef.current, game.level).boss.title : null,
             bossAudioTime: bossAudioRef.current?.currentTime, bossAudioPaused: bossAudioRef.current?.paused, bossAudioSrc: bossAudioRef.current?.src,
             starY: stars[0]?.y, playerHealth: game.player.health,
             player: { ...game.player }, now: gameNow() / 1000,
@@ -1404,7 +1417,7 @@ function Home() {
       cancelAnimationFrame(raf);
       if (import.meta.env.DEV) delete testWindow.__AUDIOSTRIKE_TEST__;
     };
-  }, [gameNow, playTrack, resumeAudio, state, syncState]);
+  }, [gameNow, playTrack, resumeAudio, state, syncState, loadLevelTracks]);
 
   useEffect(() => () => resetAudio(), [resetAudio]);
 
@@ -1459,7 +1472,7 @@ function Home() {
     resumeAudio();
     playTrack(audio, bossTrack ? 'Boss track' : 'Stage track');
   };
-  const canStart = Boolean(stageFile && bossFile);
+  const canStart = !playlistBusy && (sourceMode === 'playlist' ? playlistTracks.length > 0 : Boolean(stageFile && bossFile));
   const isGame = state === 'COUNTDOWN' || state === 'PLAYING' || state === 'BOSS_INTRO' || state === 'BOSS' || state === 'GAME_OVER';
 
   return (
@@ -1483,17 +1496,25 @@ function Home() {
               </div>
             ) : (
               <>
+                <div className="mb-4 flex gap-2" role="group" aria-label="Music source">
+                  <button className="rounded border border-slate-700 px-4 py-2 text-sm text-cyan-200" aria-pressed={sourceMode === 'files'} disabled={playlistBusy} onClick={() => setSourceMode('files')}>Separate files</button>
+                  <button className="rounded border border-slate-700 px-4 py-2 text-sm text-cyan-200" aria-pressed={sourceMode === 'playlist'} disabled={playlistBusy} onClick={() => setSourceMode('playlist')} data-testid="button-source-playlist">Playlist</button>
+                </div>
+                {sourceMode === 'playlist' && <PlaylistSetup tracks={playlistTracks} onTracks={setPlaylistTracks} random={randomOrder} onRandom={setRandomOrder} onBusy={setPlaylistBusy} />}
+                <div hidden={sourceMode !== 'files'}>
                 <div className="space-y-3">
                   <label className="file-drop block cursor-pointer rounded-xl border border-slate-800 bg-slate-950/70 p-5" data-testid="label-stage-file">
                     <div className="flex items-start gap-4"><div className="grid h-10 w-10 shrink-0 place-items-center border border-cyan-300/30 bg-cyan-300/10 text-cyan-300"><FileAudio className="h-5 w-5" /></div><div className="min-w-0"><span className="font-mono text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">Stage track</span><p className="mt-1 text-sm text-slate-400">Drives enemy count, speed, health, and patterns</p><p className="mt-3 truncate font-mono text-[10px] uppercase text-slate-500" data-testid="text-stage-file">{fileLabel(stageFile)}</p></div></div>
-                    <input ref={stageInputRef} className="sr-only" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,audio/*" data-testid="input-stage-file" />
+                    <input ref={stageInputRef} className="sr-only" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,audio/*" data-testid="input-stage-file" onChange={(event) => setStageFile(event.target.files?.[0] ?? null)} />
                   </label>
                   <label className="file-drop block cursor-pointer rounded-xl border border-slate-800 bg-slate-950/70 p-5" data-testid="label-boss-file">
                     <div className="flex items-start gap-4"><div className="grid h-10 w-10 shrink-0 place-items-center border border-orange-300/30 bg-orange-300/10 text-orange-300"><Shield className="h-5 w-5" /></div><div className="min-w-0"><span className="font-mono text-[11px] font-bold uppercase tracking-[.18em] text-orange-300">Boss track</span><p className="mt-1 text-sm text-slate-400">Plays through the full three-phase encounter</p><p className="mt-3 truncate font-mono text-[10px] uppercase text-slate-500" data-testid="text-boss-file">{fileLabel(bossFile)}</p></div></div>
-                    <input ref={bossInputRef} className="sr-only" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,audio/*" data-testid="input-boss-file" />
+                    <input ref={bossInputRef} className="sr-only" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,audio/*" data-testid="input-boss-file" onChange={(event) => setBossFile(event.target.files?.[0] ?? null)} />
                   </label>
                 </div>
+                </div>
                 <button onClick={startAnalysis} disabled={!canStart} className="action-button mt-5 flex w-full items-center justify-center gap-3 rounded-xl border border-cyan-300/50 bg-cyan-300/10 py-4 font-mono text-xs font-bold uppercase tracking-[.2em] text-cyan-200 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/50 disabled:text-slate-600" data-testid="button-analyze"><Crosshair className="h-4 w-4" /> Analyze and play</button>
+                {musicWarning && <p role="alert" className="mt-3 text-sm text-amber-200">{musicWarning}</p>}
             <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-slate-600"><Volume2 className="h-3 w-3" /> MP3 · WAV · OGG · FLAC · M4A · AAC</div>
                 <p className="controller-status mt-2" data-testid="controller-status" aria-live="polite">{controllerStatus}</p>
               </>
