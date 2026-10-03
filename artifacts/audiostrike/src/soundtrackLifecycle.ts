@@ -1,4 +1,4 @@
-import { newestLivingBoss } from './gameRules';
+import { newestLivingBoss } from './gameRules.ts';
 import type { ActiveBoss, AudioReactiveTrack, LiveFeatures } from './gameRuntimeTypes';
 
 export const blankLiveFeatures = (): LiveFeatures => ({
