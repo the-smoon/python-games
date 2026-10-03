@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { MAX_PLAYLIST_BYTES, MAX_TRACK_BYTES, validateManifest, type DiskManifest } from "./playlistManifest";
 import { logger } from "./logger";
+import { downloaderFailure } from "./playlistErrors";
 
 type Job = {
   id: string; dir: string; state: "downloading" | "ready" | "error";
@@ -91,6 +92,7 @@ export async function createJob(url: string, options: { spawnProcess?: typeof sp
   }, 500);
   job.dispose = () => { clearTimeout(timeout); clearInterval(monitor); };
   const acceptOutput = (chunk: Buffer, error: boolean) => {
+    if (!jobs.has(id) || job.state !== "downloading") return;
     outputBytes += chunk.length;
     if (outputBytes > 128 * 1024) { void fail("Downloader exceeded its output limit"); return; }
     if (error) { stderr = (stderr + chunk.toString()).slice(-1500); return; }
@@ -114,12 +116,9 @@ export async function createJob(url: string, options: { spawnProcess?: typeof sp
     if (!jobs.has(id) || job.state !== "downloading") { job.child = undefined; return; }
     job.dispose?.();
     if (code !== 0) {
-      const missing = stderr.includes("Missing required dependencies");
-      await fail(missing ? "Downloader dependencies missing: install yt-dlp and ffmpeg on the server."
-        : stderr.includes("1–20") ? "Playlist exceeds 20 tracks or is empty. Use a shorter playlist."
-        : stderr.includes("24 MB") ? "A track exceeds the 24 MB limit. Use shorter tracks."
-        : "Playlist download failed. Check that it is public, has at most 20 short tracks, and is available from this server.");
-      logger.warn({ code }, "Playlist downloader failed");
+      const failure = downloaderFailure(stderr);
+      await fail(failure.message);
+      logger.warn({ code, reason: failure.reason, completed: job.completed, total: job.total }, "Playlist downloader failed");
       job.child = undefined;
       return;
     }

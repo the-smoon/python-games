@@ -20,6 +20,20 @@ import re
 from pathlib import Path
 
 
+def is_unavailable_track_error(error: Exception) -> bool:
+    """Only skip known unavailable videos, not access blocks or conversion failures."""
+    message = str(error).lower()
+    if any(reason in message for reason in (
+            "not a bot", "sign in", "403", "429", "too many requests",
+            "postprocessing", "ffmpeg", "conversion failed")):
+        return False
+    return any(reason in message for reason in (
+        "video unavailable", "private video", "video has been removed",
+        "video is not available", "not available in your country",
+        "not made this video available in your country",
+    ))
+
+
 def game_playlist(url: str, output_dir: Path):
     """AudioStrike adapter; downloading remains in this supplied script."""
     import yt_dlp
@@ -67,9 +81,21 @@ def game_playlist(url: str, output_dir: Path):
             "retries": 1, "fragment_retries": 1, "extractor_retries": 1,
             "concurrent_fragment_downloads": 1, "match_filter": duration_filter,
             "progress_hooks": [progress], "noprogress": True,
+            # Handle unavailable videos explicitly rather than relying on yt-dlp's
+            # differing extraction/download error suppression behavior.
+            "ignoreerrors": False,
         })
-        with yt_dlp.YoutubeDL(options) as ydl:
-            ydl.extract_info(f"https://www.youtube.com/watch?v={entry['id']}", download=True)
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                ydl.extract_info(f"https://www.youtube.com/watch?v={entry['id']}", download=True)
+        except yt_dlp.utils.DownloadError as error:
+            if not is_unavailable_track_error(error):
+                raise
+            for partial in output_dir.glob(f"{index + 1:04d}.*"):
+                if partial.is_file():
+                    partial.unlink()
+            event(f"Skipping unavailable track: {title}", index + 1, len(entries))
+            continue
         target = output_dir / name
         if target.is_file():
             size = target.stat().st_size

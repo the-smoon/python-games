@@ -7,6 +7,7 @@
 - [Audio-driven attack selection](audiostrike-audio-pattern-selection.md) — pre-match motifs set visual identity; live audio continues driving waves, attacks, and movement.
 - [Weapon switching tradeoffs](audiostrike-weapon-intent.md) — rank loss is intentional; wingmen alone are destructible upgrades, and freeze stays distinct from screen-clearing bombs.
 - [Playlist intent](audiostrike-playlist-intent.md) — the supplied downloader may be adapted; odd playlists pair continuously and replay retains the once-shuffled order.
+- [Playlist source availability](audiostrike-playlist-source-availability.md) — public metadata, individual media availability, and published-server access are separate checks.
 - [API codegen compatibility](api-codegen-compatibility.md) — formatted validators must match the installed Zod major version, not the generator's assumed default.
 - [Boss survival intent](audiostrike-boss-survival-intent.md) — surviving bosses must not delay scheduled arrivals; newest living boss owns the shared soundtrack.
 - [Direct Node tests for AudioStrike](audiostrike-direct-node-tests.md) — runtime imports loaded by Node tests need explicit `.ts` extensions even when Vite accepts extensionless imports.

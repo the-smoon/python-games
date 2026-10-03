@@ -9,6 +9,7 @@ import { playlistUrl, validateManifest, MAX_TRACK_BYTES } from "../src/lib/playl
 import { createJob, inspectOutput, jobResponse, removeJob, shutdownPlaylists } from "../src/lib/playlistJobs";
 import app from "../src/app";
 import { playlistRateLimit } from "../src/routes/playlists";
+import { downloaderFailure } from "../src/lib/playlistErrors";
 import type { Request, Response } from "express";
 
 test.after(shutdownPlaylists);
@@ -94,6 +95,37 @@ test("download errors, timeout, excessive output, corrupt manifest and cancellat
     else { await waitState(job, "error"); await removeJob(job.id); }
     await assert.rejects(stat(job.dir), { code: "ENOENT" });
   }
+});
+test("downloader failures have safe, specific messages and preserve no raw stderr", async () => {
+  const cases = [
+    ["Missing required dependencies", "DEPENDENCIES_MISSING", /dependencies/],
+    ["Playlists must contain 1–20 tracks", "TRACK_COUNT_LIMIT", /1–20/],
+    ["File size limit exceeded", "TRACK_SIZE_LIMIT", /24 MB/],
+    ["Track exceeds the 12 minute limit", "TRACK_DURATION_LIMIT", /12-minute/],
+    ["ERROR: Sign in to confirm you're not a bot", "SOURCE_ACCESS_BLOCKED", /YouTube is refusing/],
+    ["HTTP Error 403: Forbidden", "SOURCE_ACCESS_BLOCKED", /public playlist can still be blocked/],
+    ["Postprocessing: ffmpeg failed", "CONVERSION_FAILED", /converted to MP3/],
+    ["Unable to download video data: timed out", "SOURCE_CONNECTION_FAILED", /could not finish downloading/],
+    ["No playable tracks downloaded", "NO_PLAYABLE_TRACKS", /playlist itself is public/],
+    ["Permission denied: /tmp/private-file", "OUTPUT_FAILED", /could not save/],
+    ["Unexpected failure https://example.test?token=private-data", "PREPARATION_FAILED", /not necessarily mean/],
+  ] as const;
+  for (const [stderr, reason, expected] of cases) {
+    const failure = downloaderFailure(stderr);
+    assert.equal(failure.reason, reason);
+    assert.match(failure.message, expected);
+    assert.doesNotMatch(failure.message, /private-data|private-file|example\.test/);
+  }
+  const fake = fakeProcess();
+  const job = await createJob("https://music.youtube.com/playlist?list=A", fake);
+  try {
+    fake.child.stderr.write("HTTP Error 403: Forbidden https://example.test?token=private-data");
+    fake.child.emit("close", 1);
+    await waitState(job, "error");
+    fake.child.stdout.write(JSON.stringify({ message: "Late progress", completed: 1, total: 2 }) + "\n");
+    assert.match(jobResponse(job).message, /YouTube is refusing/);
+    assert.doesNotMatch(jobResponse(job).message, /private-data|example\.test/);
+  } finally { await removeJob(job.id); }
 });
 test("global concurrency admits two downloads and rejects a third", async () => {
   const one = await createJob("https://music.youtube.com/playlist?list=A", fakeProcess());
