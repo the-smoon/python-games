@@ -9,20 +9,6 @@ args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
-runButton = "Project"
-
-[[workflows.workflow]]
-name = "AudioStrike Game"
-mode = "sequential"
-author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "webview"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd artifacts/jet-game && python server.py"
-waitForPort = 8000
 
 [[workflows.workflow]]
 name = "artifacts/api-server: API Server"
@@ -78,15 +64,6 @@ args = "AudioStrike Game"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "artifacts/mockup-sandbox: Component Preview Server"
-
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "AudioStrike Game"
 
 [agent]
 stack = "PNPM_WORKSPACE"
