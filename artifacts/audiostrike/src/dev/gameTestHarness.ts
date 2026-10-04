@@ -120,6 +120,7 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
           motion: enemy.motion, pattern: enemy.pattern, projectile: enemy.projectile, subBoss: enemy.subBoss,
           ownerId: enemy.ownerId, frame: enemy.frame, speed: enemy.speed,
           frozenUntil: enemy.frozenUntil, fireTimer: enemy.fireTimer, alive: enemy.alive,
+          exiting: enemy.exiting, fireRate: enemy.fireRate,
         })),
         enemyShots: game.enemyBullets.map((shot) => ({ ...shot })),
       };

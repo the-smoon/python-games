@@ -50,16 +50,24 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
     assert.equal(firstStage.stageAudioPaused, false);
     assert.equal(firstStage.bossAudioPaused, true);
 
+    await page.evaluate(() => {
+      window.__AUDIOSTRIKE_TEST__.setPlayer({ invincible: 1e9 });
+      window.__AUDIOSTRIKE_TEST__.spawnTarget(80, 150, 1e9, false, .001, 30);
+    });
+    const survivor = (state) => state.enemies.find((enemy) => !enemy.subBoss && enemy.health > 1e8);
     await page.clock.fastForward((STAGE_LEVEL_SECONDS + 0.1) * 1000);
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'BOSS_INTRO');
     const transition = await snapshot();
     assert.equal(transition.bossAudioPaused, true, 'incoming boss is not audible until combat begins');
     assert.equal(transition.stageAudioPaused, false);
+    assert.equal(survivor(transition)?.exiting, false, 'stage end does not force existing enemies to flee');
+    assert.equal(survivor(transition)?.fireRate, 30, 'stage end preserves existing enemy attacks');
     await page.clock.runFor(2000);
     const midTransition = await snapshot();
     assert.equal(midTransition.state, 'BOSS_INTRO');
     assert.equal(midTransition.spawnIndex, transition.spawnIndex, 'the five-second transition adds no stage enemies');
     assert.notEqual(midTransition.starY, transition.starY, 'stars move during the transition');
+    assert.ok(survivor(midTransition), 'regular enemies remain during the boss transition');
     await page.clock.runFor((BOSS_ARRIVAL_SECONDS - 2) * 1000 + 200);
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'BOSS');
     const firstBoss = await snapshot();
@@ -67,6 +75,11 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
     assert.ok(firstBoss.bossMaxHealth >= 1050 && firstBoss.bossMaxHealth <= 1300, 'first boss has half the old health baseline');
     assert.equal(firstBoss.stageAudioPaused, true);
     assert.equal(firstBoss.bossAudioPaused, false);
+    assert.ok(survivor(firstBoss), 'boss arrival does not clear existing regular enemies');
+    await page.clock.runFor(1000);
+    const duringBoss = await snapshot();
+    assert.ok(survivor(duringBoss), 'regular enemies keep fighting alongside the boss');
+    assert.equal(duringBoss.spawnIndex, firstBoss.spawnIndex, 'regular spawning remains paused during the boss fight');
     await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.spawnSubBoss());
     assert.ok((await snapshot()).subBossCount >= 1, 'boss has independently tracked sub-bosses');
 
