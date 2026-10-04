@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { selectMockPlaylist } from './drivePlaylistFixture.mjs';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
@@ -40,8 +41,7 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
     await page.clock.install();
     await page.addInitScript(() => { window.__AUDIOSTRIKE_TEST_MODE__ = true; });
     assert.equal((await page.goto(url))?.status(), 200);
-    await page.getByTestId('input-stage-file').setInputFiles({ name: 'stage.wav', mimeType: 'audio/wav', buffer: toneWav(110) });
-    await page.getByTestId('input-boss-file').setInputFiles({ name: 'boss.wav', mimeType: 'audio/wav', buffer: toneWav(1100) });
+    await selectMockPlaylist(page, [{ name: 'stage.mp3', buffer: toneWav(110) }, { name: 'boss.mp3', buffer: toneWav(1100) }]);
     await page.getByTestId('button-analyze').click();
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
     const snapshot = () => page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot());
@@ -113,27 +113,9 @@ test('timed encounters stack, preserve playlist ownership, pause, pickups, and i
     page.on('pageerror', (error) => errors.push(error.message));
     await page.clock.install();
     await page.addInitScript(() => { window.__AUDIOSTRIKE_TEST_MODE__ = true; Math.random = () => .7; });
-    const jobId = '11111111-1111-4111-8111-111111111111';
     const titles = ['A', 'B', 'C'];
-    await page.route('**/api/playlists**', async (route) => {
-      const request = route.request(), path = new URL(request.url()).pathname;
-      if (request.method() === 'DELETE') { await route.fulfill({ status: 204 }); return; }
-      if (path.includes('/tracks/')) {
-        await route.fulfill({ status: 200, contentType: 'audio/wav', body: toneWav([110, 1100, 3200][Number(path.split('/').pop())]) });
-        return;
-      }
-      await route.fulfill({ status: request.method() === 'POST' ? 202 : 200, json: {
-        id: jobId, state: 'ready', message: 'Ready', completed: 3, total: 3,
-        manifest: { version: 1, skipped: 0, tracks: titles.map((title, index) => ({
-          id: String(index), title, url: `/api/playlists/${jobId}/tracks/${index}`,
-        })) },
-      } });
-    });
     await page.goto(url);
-    await page.getByTestId('button-source-playlist').click();
-    await page.getByTestId('input-playlist-url').fill('https://music.youtube.com/playlist?list=PL_Test');
-    await page.getByTestId('button-download-playlist').click();
-    await page.getByTestId('playlist-tracks').waitFor();
+    await selectMockPlaylist(page, titles.map((name, i) => ({ name, buffer: toneWav([110, 1100, 3200][i]) })));
     await page.getByTestId('button-analyze').click();
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
     const snapshot = () => page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot());

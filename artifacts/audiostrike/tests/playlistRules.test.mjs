@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { levelPair, shuffleTracks, moveTrack, uploadedManifest, validateRemotePlaylist } from '../src/playlistRules.ts';
+import { levelPair, shuffleTracks, moveTrack, validateLocalPlaylist } from '../src/playlistRules.ts';
 import { releaseBossAudio, SoundtrackLifecycle } from '../src/soundtrackLifecycle.ts';
 
 function fakeAudio(paused = true) {
@@ -37,24 +37,15 @@ test('manual ordering and once-only shuffle preserve every track without mutatin
   assert.throws(() => shuffleTracks(tracks, () => 1));
   assert.throws(() => moveTrack(tracks, -1, 0));
 });
-test('separate upload selectors use the manifest path and repeat the same pair', () => {
-  const stage = new File(['stage'], 'stage.wav'), boss = new File(['boss'], 'boss.wav');
-  const manifest = uploadedManifest(stage, boss);
-  assert.equal(manifest.version, 1);
-  for (const level of [1, 2, 100]) {
-    const pair = levelPair(manifest.tracks, level);
-    assert.equal(pair.stage.file, stage); assert.equal(pair.boss.file, boss);
-  }
-});
-test('remote manifests reject external, arbitrary, reordered-index and traversal paths', () => {
-  const id = '11111111-1111-4111-8111-111111111111';
-  const data = { id, state: 'ready', message: 'Ready', completed: 1, total: 1,
-    manifest: { version: 1, skipped: 0, tracks: [{ id: '0', title: 'A', url: `/api/playlists/${id}/tracks/0` }] } };
-  assert.deepEqual(validateRemotePlaylist(data), data);
-  for (const url of ['https://evil.test/a.mp3', '/etc/passwd', '../a.mp3', `/api/playlists/${id}/tracks/1`]) {
-    assert.throws(() => validateRemotePlaylist({ ...data, manifest: { ...data.manifest, tracks: [{ ...data.manifest.tracks[0], url }] } }));
-  }
-  assert.throws(() => validateRemotePlaylist({ ...data, manifest: { ...data.manifest, tracks: [] } }));
+test('startup requires nonempty valid Drive tracks within playlist limits', () => {
+  const track = { id: 'drive-A', title: 'A.mp3', file: new File(['mp3'], 'A.mp3', { type: 'audio/mpeg' }) };
+  validateLocalPlaylist([track]);
+  assert.throws(() => validateLocalPlaylist([]));
+  assert.throws(() => validateLocalPlaylist([track, track]));
+  assert.throws(() => validateLocalPlaylist([{ ...track, id: '../outside' }]));
+  assert.throws(() => validateLocalPlaylist([{ ...track, file: new File([], 'empty.mp3', { type: 'audio/mpeg' }) }]));
+  assert.throws(() => validateLocalPlaylist([{ ...track, file: new File(['wav'], 'A.wav', { type: 'audio/wav' }) }]));
+  assert.throws(() => validateLocalPlaylist(Array.from({ length: 21 }, (_, i) => ({ ...track, id: String(i) }))));
 });
 
 test('soundtrack selects the newest living boss, then older living bosses, then the stage track', () => {

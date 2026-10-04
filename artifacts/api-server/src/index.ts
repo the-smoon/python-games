@@ -1,6 +1,5 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { shutdownPlaylists } from "./lib/playlistJobs";
 
 const rawPort = process.env["PORT"];
 
@@ -24,10 +23,12 @@ const server = app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
 });
+server.requestTimeout = 60_000;
+server.headersTimeout = 15_000;
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     server.close();
-    void shutdownPlaylists().finally(() => process.exit(0));
+    process.exit(0);
   });
 }

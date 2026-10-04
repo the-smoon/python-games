@@ -14,7 +14,7 @@ function tone(hz) {
   for (let i = 0; i < rate; i++) wav.writeInt16LE(Math.round(Math.sin(i / rate * Math.PI * 2 * hz) * 9000), 44 + i * 2);
   return wav;
 }
-test('playlist recovery, reordering, once-only shuffle, odd wrap, level analysis and replay', { timeout: 90000 }, async () => {
+test('Drive picker recovery, shared save/load, ordering, one-time shuffle, odd wrap and replay', { timeout: 90000 }, async () => {
   const executablePath = process.env.CHROMIUM_PATH || execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim();
   const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
   try {
@@ -24,52 +24,66 @@ test('playlist recovery, reordering, once-only shuffle, odd wrap, level analysis
       page.on('pageerror', (error) => errors.push(error.message));
       await page.clock.install();
       await page.addInitScript(() => { window.__AUDIOSTRIKE_TEST_MODE__ = true; Math.random = () => 0; });
-      const id = '11111111-1111-4111-8111-111111111111';
       const titles = mode === 'single' ? ['A'] : ['A', 'B', 'C'];
-      let behavior = 'invalid', deleted = 0, gets = 0;
-      const job = (state) => ({ id, state, message: state === 'downloading' ? 'Downloading tracks' : 'Ready',
-        completed: state === 'downloading' ? 0 : titles.length, total: titles.length,
-        manifest: state === 'ready' ? { version: 1, skipped: 0, tracks: titles.map((title, i) => ({ id: String(i), title, url: `/api/playlists/${id}/tracks/${i}` })) } : undefined });
+      let behavior = 'oversized';
+      const library = titles.map((title, i) => ({ id: title, title, size: tone([110, 1100, 3200][i]).length }));
+      const saved = new Map();
       await page.route('**/api/playlists**', async (route) => {
         const req = route.request(), path = new URL(req.url()).pathname;
-        if (req.method() === 'DELETE') { deleted++; await route.fulfill({ status: 204 }); return; }
+        if (path.endsWith('/owner')) { await route.fulfill({ json: { owner: false, configured: false } }); return; }
+        if (path.endsWith('/library')) { await route.fulfill({ json: library }); return; }
         if (req.method() === 'POST') {
-          gets = 0;
-          if (behavior === 'invalid') { await route.fulfill({ status: 400, json: { error: 'Use a public playlist URL' } }); return; }
-          await route.fulfill({ status: 202, json: job('downloading') }); return;
+          const input = req.postDataJSON();
+          if ([...saved.values()].some(list => list.name === input.name)) {
+            await route.fulfill({ status: 409, json: { error: 'A playlist with that name already exists' } }); return;
+          }
+          const id = `saved-${saved.size}`;
+          const list = { id, name: input.name, tracks: input.trackIds.map(id => library.find(track => track.id === id)) };
+          saved.set(id, list);
+          await route.fulfill({ status: 201, json: { id, name: list.name } }); return;
         }
-        if (path.includes('/tracks/')) {
-          const i = Number(path.split('/').pop());
+        if (path.includes('/audio/')) {
+          const i = titles.indexOf(path.split('/').pop());
           const wav = tone([110, 1100, 3200][i]);
           await route.fulfill({ status: 200, contentType: 'audio/mpeg',
             headers: { 'content-length': String(behavior === 'oversized' ? 25 * 1024 * 1024 : wav.length) }, body: wav });
           return;
         }
-        gets++;
-        await route.fulfill({ status: 200, json: job(behavior === 'cancel' || gets === 1 ? 'downloading' : 'ready') });
+        const last = path.split('/').pop();
+        await route.fulfill({ json: saved.has(last) ? saved.get(last) : [...saved.values()].map(({id,name}) => ({id,name})) });
       });
       await page.goto(url);
-      await page.getByTestId('button-source-playlist').click();
-      await page.getByTestId('input-playlist-url').fill('https://music.youtube.com/playlist?list=PL_Test');
-      await page.getByTestId('button-download-playlist').click();
-      await page.getByTestId('playlist-error').waitFor();
-      assert.match(await page.getByTestId('playlist-error').innerText(), /public/);
-      behavior = 'oversized';
-      await page.getByTestId('button-download-playlist').click();
-      await page.clock.runFor(2500);
-      await page.waitForFunction(() => document.querySelector('[data-testid=playlist-error]')?.textContent.includes('size limit'));
-      behavior = 'cancel';
-      await page.getByTestId('button-download-playlist').click();
-      await page.getByRole('button', { name: 'Cancel download' }).click();
-      await page.waitForFunction(() => !document.querySelector('[data-testid=button-download-playlist]').disabled);
+      assert.equal(await page.getByTestId('button-analyze').isDisabled(), true);
+      assert.equal(await page.getByTestId('input-stage-file').count(), 0);
+      assert.equal(await page.getByTestId('input-owner-upload').count(), 0);
+      await page.getByTestId('button-add-A').click();
+      await page.waitForFunction(() => document.querySelector('[data-testid=playlist-error]')?.textContent.includes('24 MB'));
       behavior = 'success';
-      await page.getByTestId('button-download-playlist').click();
-      await page.clock.runFor(2500);
-      await page.getByTestId('playlist-tracks').waitFor();
+      for (const title of titles) {
+        await page.getByTestId(`button-add-${title}`).click();
+        await page.getByTestId(`button-remove-${title}`).waitFor();
+      }
+      await page.getByTestId('button-remove-A').click();
+      if (mode === 'single') assert.equal(await page.getByTestId('button-analyze').isDisabled(), true);
+      await page.getByTestId('button-add-A').click();
+      await page.getByTestId('button-remove-A').waitFor();
+      if (mode !== 'single') {
+        await page.getByRole('button', { name: 'Move A up', exact: true }).click();
+        await page.getByRole('button', { name: 'Move A up', exact: true }).click();
+      }
       if (mode === 'manual') {
         await page.getByRole('button', { name: 'Move C up', exact: true }).click();
         await page.getByRole('button', { name: 'Move C up', exact: true }).click();
       }
+      await page.getByTestId('input-playlist-name').fill('Browser test');
+      await page.getByTestId('button-save-playlist').click();
+      await page.waitForFunction(() => document.querySelector('[data-testid=playlist-status]')?.textContent.includes('Saved'));
+      await page.getByTestId('button-save-playlist').click();
+      await page.waitForFunction(() => document.querySelector('[data-testid=playlist-error]')?.textContent.includes('already exists'));
+      await page.reload();
+      await page.getByTestId('select-saved-playlist').selectOption('saved-0');
+      await page.getByTestId('button-load-playlist').click();
+      await page.waitForFunction(() => document.querySelector('[data-testid=playlist-status]')?.textContent.includes('Loaded'));
       if (mode === 'random') await page.getByTestId('input-shuffle-playlist').check();
       await page.getByTestId('button-analyze').click();
       await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
@@ -105,7 +119,6 @@ test('playlist recovery, reordering, once-only shuffle, odd wrap, level analysis
       await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
       assert.equal((await snap()).stageTrackTitle, order[0]);
       assert.deepEqual((await snap()).trackOrder, order);
-      assert.ok(deleted >= 3, 'temporary files are removed for oversized, cancelled and successful downloads');
       assert.deepEqual(errors, []);
       await page.close();
     }

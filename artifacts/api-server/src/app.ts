@@ -35,7 +35,7 @@ const errors: ErrorRequestHandler = (error, req, res, next) => {
   if (res.headersSent) { next(error); return; }
   const status = error.status === 413 ? 413 : error.status === 400 ? 400 : 500;
   if (status === 500) req.log.error("Unhandled API request error");
-  res.status(status).json({ error: status === 413 ? "Request body exceeds 4 KB"
+    res.status(status).json({ error: status === 413 ? "Request exceeds the size limit (MP3: 24 MB; JSON: 4 KB)"
     : status === 400 ? "Invalid request body" : "The request could not be completed" });
 };
 app.use(errors);

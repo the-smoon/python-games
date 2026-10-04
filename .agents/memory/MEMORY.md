@@ -3,11 +3,11 @@
 - [Portrait-first gameplay](audiostrike-portrait-first.md) — prioritize Pixel 9 portrait legibility and keep the player visible through damage feedback.
 - [AudioStrike transition safety](audiostrike-transition-safety.md) — non-finite player coordinates can silently strand timed transitions; keep exit fallbacks independent of position.
 - [Browser game clock tests](audiostrike-browser-clock-tests.md) — advance time with the browser clock, not by overriding performance.now, when testing state transitions.
+- [Drive upload browser checks](drive-upload-browser-checks.md) — verify persisted uploads through a fresh library request when Chrome discards the upload response body.
 - [Bazzite Chrome Flatpak controllers](audiostrike-bazzite-controller.md) — read-only udev access restored Chrome's controller enumeration; verify browser detection before changing game code.
 - [Audio-driven attack selection](audiostrike-audio-pattern-selection.md) — pre-match motifs set visual identity; live audio continues driving waves, attacks, and movement.
 - [Weapon switching tradeoffs](audiostrike-weapon-intent.md) — rank loss is intentional; wingmen alone are destructible upgrades, and freeze stays distinct from screen-clearing bombs.
-- [Playlist intent](audiostrike-playlist-intent.md) — the supplied downloader may be adapted; odd playlists pair continuously and replay retains the once-shuffled order.
-- [Playlist source availability](audiostrike-playlist-source-availability.md) — public metadata, individual media availability, and published-server access are separate checks.
+- [Playlist intent](audiostrike-playlist-intent.md) — Drive playlists are shared, uploads owner-only; odd lists pair continuously and replay retains the once-shuffled order.
 - [API codegen compatibility](api-codegen-compatibility.md) — formatted validators must match the installed Zod major version, not the generator's assumed default.
 - [Boss survival intent](audiostrike-boss-survival-intent.md) — surviving bosses must not delay scheduled arrivals; newest living boss owns the shared soundtrack.
 - [Direct Node tests for AudioStrike](audiostrike-direct-node-tests.md) — runtime imports loaded by Node tests need explicit `.ts` extensions even when Vite accepts extensionless imports.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Crosshair, FileAudio, Gamepad2, Headphones, Pause, Play, RotateCcw, Shield, Volume2, Zap } from 'lucide-react';
+import { Crosshair, Gamepad2, Headphones, Pause, Play, RotateCcw, Volume2, Zap } from 'lucide-react';
 import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, encounterSignature, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
 import { audioIntensity, blendAudioSignals, bossHealth, chooseAttack, chooseMotion, generateForm, spawnProfile, varyShapeIdentity, type FormProfile, type ShapeIdentity } from './encounterRules';
@@ -8,7 +8,7 @@ import WeaponHUD from './WeaponHUD';
 import { drawFrozenHalo, drawWeaponEffects } from './weaponVisuals';
 import { analyzeMusic } from './musicAnalysis';
 import PlaylistSetup from './PlaylistSetup';
-import { levelPair, shuffleTracks, uploadedManifest, type LocalTrack } from './playlistRules';
+import { levelPair, shuffleTracks, validateLocalPlaylist, type LocalTrack } from './playlistRules';
 import { separateBossPositions } from './gameRules';
 import { EncounterScheduler } from './encounterScheduler';
 import { FrameCombatSimulation } from './combatSimulation';
@@ -276,8 +276,6 @@ function Home() {
     width: W, height: H, playerWidth: PLAYER_W, playerHeight: PLAYER_H,
     maxSpeed: PLAYER_MAX_SPEED, acceleration: PLAYER_ACCELERATION, deceleration: PLAYER_DECELERATION,
   }));
-  const stageInputRef = useRef<HTMLInputElement>(null);
-  const bossInputRef = useRef<HTMLInputElement>(null);
   const stageAudioRef = useRef<HTMLAudioElement | null>(null);
   const bossAudioRef = useRef<HTMLAudioElement | null>(null);
   const joystickRef = useRef<Joystick>(neutralJoystick());
@@ -297,9 +295,6 @@ function Home() {
     const clock = pauseRef.current;
     return (clock.since ?? performance.now()) - clock.total;
   }, []);
-  const [stageFile, setStageFile] = useState<File | null>(null);
-  const [bossFile, setBossFile] = useState<File | null>(null);
-  const [sourceMode, setSourceMode] = useState<'files' | 'playlist'>('files');
   const [playlistTracks, setPlaylistTracks] = useState<LocalTrack[]>([]);
   const [randomOrder, setRandomOrder] = useState(false);
   const [playlistBusy, setPlaylistBusy] = useState(false);
@@ -414,17 +409,20 @@ function Home() {
   }, [togglePause]);
 
   const startAnalysis = useCallback(async () => {
-    const manifest = sourceMode === 'playlist'
-      ? { version: 1 as const, tracks: playlistTracks }
-      : stageFile && bossFile ? uploadedManifest(stageFile, bossFile) : null;
-    if (!manifest?.tracks.length || playlistBusy) return;
+    if (playlistBusy) return;
+    try { validateLocalPlaylist(playlistTracks); }
+    catch (error) {
+      setMusicWarning(error instanceof Error ? error.message : 'Choose a valid playlist');
+      return;
+    }
+    const manifest = { version: 1 as const, tracks: playlistTracks };
     syncState('ANALYZING');
     setMusicWarning('');
     setAnalysisProgress(2);
     setAnalysisMessage('Reading stage metadata');
     resetAudio();
     try {
-      const ordered = sourceMode === 'playlist' && randomOrder ? shuffleTracks(manifest.tracks) : manifest.tracks;
+      const ordered = randomOrder ? shuffleTracks(manifest.tracks) : manifest.tracks;
       for (let index = 0; index < ordered.length; index++) {
         const track = ordered[index];
         setAnalysisMessage(`Mapping track ${index + 1}/${ordered.length}: ${track.title}`);
@@ -463,7 +461,7 @@ function Home() {
       setMusicWarning(error instanceof Error ? error.message : 'Track preparation failed. Try again.');
       syncState('UPLOAD');
     }
-  }, [bossFile, resetAudio, stageFile, syncState, sourceMode, playlistTracks, playlistBusy, randomOrder, loadLevelTracks]);
+  }, [resetAudio, syncState, playlistTracks, playlistBusy, randomOrder, loadLevelTracks]);
 
   const beginCountdown = useCallback(() => {
     const game = gameRef.current;
@@ -1210,7 +1208,6 @@ function Home() {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
-  const fileLabel = (file: File | null) => file ? `${file.name} · ${(file.size / 1048576).toFixed(1)} MB` : 'No track selected';
   const retryAudio = () => {
     if (pauseRef.current.since !== null) return;
     const game = gameRef.current;
@@ -1225,7 +1222,7 @@ function Home() {
     resumeAudio();
     playTrack(audio, bossTrack ? 'Boss track' : 'Stage track');
   };
-  const canStart = !playlistBusy && (sourceMode === 'playlist' ? playlistTracks.length > 0 : Boolean(stageFile && bossFile));
+  const canStart = !playlistBusy && playlistTracks.length > 0;
   const isGame = state === 'COUNTDOWN' || state === 'PLAYING' || state === 'BOSS_INTRO' || state === 'BOSS' || state === 'GAME_OVER';
 
   return (
@@ -1249,26 +1246,10 @@ function Home() {
               </div>
             ) : (
               <>
-                <div className="mb-4 flex gap-2" role="group" aria-label="Music source">
-                  <button className="rounded border border-slate-700 px-4 py-2 text-sm text-cyan-200" aria-pressed={sourceMode === 'files'} disabled={playlistBusy} onClick={() => setSourceMode('files')}>Separate files</button>
-                  <button className="rounded border border-slate-700 px-4 py-2 text-sm text-cyan-200" aria-pressed={sourceMode === 'playlist'} disabled={playlistBusy} onClick={() => setSourceMode('playlist')} data-testid="button-source-playlist">Playlist</button>
-                </div>
-                {sourceMode === 'playlist' && <PlaylistSetup tracks={playlistTracks} onTracks={setPlaylistTracks} random={randomOrder} onRandom={setRandomOrder} onBusy={setPlaylistBusy} />}
-                <div hidden={sourceMode !== 'files'}>
-                <div className="space-y-3">
-                  <label className="file-drop block cursor-pointer rounded-xl border border-slate-800 bg-slate-950/70 p-5" data-testid="label-stage-file">
-                    <div className="flex items-start gap-4"><div className="grid h-10 w-10 shrink-0 place-items-center border border-cyan-300/30 bg-cyan-300/10 text-cyan-300"><FileAudio className="h-5 w-5" /></div><div className="min-w-0"><span className="font-mono text-[11px] font-bold uppercase tracking-[.18em] text-cyan-300">Stage track</span><p className="mt-1 text-sm text-slate-400">Drives enemy count, speed, health, and patterns</p><p className="mt-3 truncate font-mono text-[10px] uppercase text-slate-500" data-testid="text-stage-file">{fileLabel(stageFile)}</p></div></div>
-                    <input ref={stageInputRef} className="sr-only" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,audio/*" data-testid="input-stage-file" onChange={(event) => setStageFile(event.target.files?.[0] ?? null)} />
-                  </label>
-                  <label className="file-drop block cursor-pointer rounded-xl border border-slate-800 bg-slate-950/70 p-5" data-testid="label-boss-file">
-                    <div className="flex items-start gap-4"><div className="grid h-10 w-10 shrink-0 place-items-center border border-orange-300/30 bg-orange-300/10 text-orange-300"><Shield className="h-5 w-5" /></div><div className="min-w-0"><span className="font-mono text-[11px] font-bold uppercase tracking-[.18em] text-orange-300">Boss track</span><p className="mt-1 text-sm text-slate-400">Plays through the full three-phase encounter</p><p className="mt-3 truncate font-mono text-[10px] uppercase text-slate-500" data-testid="text-boss-file">{fileLabel(bossFile)}</p></div></div>
-                    <input ref={bossInputRef} className="sr-only" type="file" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,audio/*" data-testid="input-boss-file" onChange={(event) => setBossFile(event.target.files?.[0] ?? null)} />
-                  </label>
-                </div>
-                </div>
+                <PlaylistSetup tracks={playlistTracks} onTracks={setPlaylistTracks} random={randomOrder} onRandom={setRandomOrder} onBusy={setPlaylistBusy} />
                 <button onClick={startAnalysis} disabled={!canStart} className="action-button mt-5 flex w-full items-center justify-center gap-3 rounded-xl border border-cyan-300/50 bg-cyan-300/10 py-4 font-mono text-xs font-bold uppercase tracking-[.2em] text-cyan-200 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/50 disabled:text-slate-600" data-testid="button-analyze"><Crosshair className="h-4 w-4" /> Analyze and play</button>
                 {musicWarning && <p role="alert" className="mt-3 text-sm text-amber-200">{musicWarning}</p>}
-            <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-slate-600"><Volume2 className="h-3 w-3" /> MP3 · WAV · OGG · FLAC · M4A · AAC</div>
+            <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-slate-600"><Volume2 className="h-3 w-3" /> Shared Drive MP3 library</div>
                 <p className="controller-status mt-2" data-testid="controller-status" aria-live="polite">{controllerStatus}</p>
               </>
             )}

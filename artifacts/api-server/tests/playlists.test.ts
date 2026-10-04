@@ -1,193 +1,151 @@
 import assert from "node:assert/strict";
-import { once, EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
-import { mkdtemp, writeFile, rm, symlink, truncate, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import test from "node:test";
-import { playlistUrl, validateManifest, MAX_TRACK_BYTES } from "../src/lib/playlistManifest";
-import { createJob, inspectOutput, jobResponse, removeJob, shutdownPlaylists } from "../src/lib/playlistJobs";
-import app from "../src/app";
-import { playlistRateLimit } from "../src/routes/playlists";
-import { downloaderFailure } from "../src/lib/playlistErrors";
-import type { Request, Response } from "express";
+import { readFile } from "node:fs/promises";
+import express from "express";
+import { DriveLibrary, fileId, playlistName, MAX_TRACK_BYTES, readBounded, validateMp3, type DriveFile } from "../src/lib/driveLibrary";
+import { createPlaylistRouter } from "../src/routes/playlists";
 
-test.after(shutdownPlaylists);
-const manifest = { version: 1 as const, skipped: 0, tracks: [
-  { file: "0002.mp3", title: "Second first" }, { file: "0001.mp3", title: "First second" },
-] };
-test("validates and canonicalizes supported URLs without accepting arbitrary hosts", () => {
-  assert.equal(playlistUrl("https://www.youtube.com/playlist?list=PL_Test&foo=bar"), "https://music.youtube.com/playlist?list=PL_Test");
-  for (const url of ["http://music.youtube.com/playlist?list=x", "https://music.youtube.com.evil.test/playlist?list=x",
-    "https://localhost/playlist?list=x", "https://user@music.youtube.com/playlist?list=x",
-    "https://music.youtube.com:8080/playlist?list=x", "https://music.youtube.com/watch?v=x",
-    "https://music.youtube.com/playlist?list=../../file", "; touch /tmp/x", null]) assert.throws(() => playlistUrl(url));
-});
-test("manifest order is retained and paths/counts/titles are strictly validated", () => {
-  assert.deepEqual(validateManifest(manifest), manifest);
-  for (const file of ["../0001.mp3", "/etc/passwd", "https://evil.test/a.mp3", "a.mp3"]) {
-    assert.throws(() => validateManifest({ ...manifest, tracks: [{ file, title: "A" }] }));
-  }
-  assert.throws(() => validateManifest({ ...manifest, tracks: [] }));
-  assert.throws(() => validateManifest({ ...manifest, tracks: Array(21).fill(manifest.tracks[0]) }));
-  assert.throws(() => validateManifest({ ...manifest, tracks: Array(2).fill(manifest.tracks[0]) }));
-});
-test("download output rejects symlinks, missing files, per-track and total oversize", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "playlist-validation-"));
-  try {
-    for (const track of manifest.tracks) await writeFile(path.join(dir, track.file), "mp3");
-    assert.deepEqual(await inspectOutput(dir, manifest), manifest);
-    await rm(path.join(dir, "0001.mp3"));
-    await symlink(path.join(dir, "0002.mp3"), path.join(dir, "0001.mp3"));
-    await assert.rejects(inspectOutput(dir, manifest), /unsafe/);
-    await rm(path.join(dir, "0001.mp3"));
-    await assert.rejects(inspectOutput(dir, manifest));
-    await truncate(path.join(dir, "0002.mp3"), MAX_TRACK_BYTES + 1);
-    await assert.rejects(inspectOutput(dir, { ...manifest, tracks: [manifest.tracks[0]] }), /24 MB/);
-    const tracks = [];
-    for (let index = 1; index <= 9; index++) {
-      const file = `${String(index).padStart(4, "0")}.mp3`;
-      await writeFile(path.join(dir, file), "");
-      await truncate(path.join(dir, file), MAX_TRACK_BYTES);
-      tracks.push({ file, title: "A" });
+const mp3 = await readFile(new URL("./fixtures/tone.mp3", import.meta.url));
+function fakeDrive() {
+  const files = new Map<string, DriveFile>([
+    ["music", { id: "music", name: "Music", mimeType: "application/vnd.google-apps.folder" }],
+    ["songs", { id: "songs", name: "AudioStrike Playlists", mimeType: "application/vnd.google-apps.folder", parents: ["music"] }],
+    ...["A", "B", "C"].map(id => [id, { id, name: `${id}.mp3`, mimeType: "audio/mpeg", size: String(mp3.length), parents: ["music"] }] as [string, DriveFile]),
+    ["outside", { id: "outside", name: "secret.mp3", mimeType: "audio/mpeg", size: String(mp3.length), parents: ["private"] }],
+  ]);
+  const contents = new Map<string, Buffer>(["A", "B", "C", "outside"].map(id => [id, mp3]));
+  const calls: string[] = [];
+  let failure = 0, counter = 0;
+  const request = async (path: string, init?: RequestInit) => {
+    calls.push(path);
+    if (failure) return Response.json({ token: "must never escape", error: "private error" }, { status: failure });
+    const url = new URL(path, "https://www.googleapis.com");
+    if (url.pathname === "/drive/v3/files" && init?.method === "POST") {
+      const metadata = JSON.parse(String(init.body));
+      const id = `created-${++counter}`;
+      files.set(id, { id, ...metadata }); return Response.json({ id });
     }
-    await assert.rejects(inspectOutput(dir, { version: 1, skipped: 0, tracks }), /192 MB/);
-  } finally { await rm(dir, { recursive: true, force: true }); }
-});
-function fakeProcess() {
-  const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() });
-  const calls: unknown[][] = [];
-  const spawnProcess = (...args: unknown[]) => { calls.push(args); return child; };
-  return { child, calls, spawnProcess: spawnProcess as unknown as NonNullable<Parameters<typeof createJob>[1]>["spawnProcess"] };
-}
-async function waitState(job: Awaited<ReturnType<typeof createJob>>, state: string) {
-  for (let i = 0; i < 100 && job.state !== state; i++) await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.equal(job.state, state);
-}
-test("safe argv, progress, ordered manifest, and explicit cleanup", async () => {
-  const fake = fakeProcess();
-  const job = await createJob("https://music.youtube.com/playlist?list=PL_Test", fake);
-  try {
-    assert.equal(fake.calls[0][0], "python");
-    assert.equal((fake.calls[0][2] as { shell: boolean }).shell, false);
-    assert.ok((fake.calls[0][1] as string[]).includes("--game-manifest"));
-    fake.child.stdout.write(JSON.stringify({ message: "Downloading 1/2", completed: 0, total: 2 }) + "\n");
-    assert.equal(jobResponse(job).total, 2);
-    for (const track of manifest.tracks) await writeFile(path.join(job.dir, track.file), "mp3");
-    await writeFile(path.join(job.dir, "manifest.json"), JSON.stringify(manifest));
-    fake.child.emit("close", 0);
-    await waitState(job, "ready");
-    assert.deepEqual(jobResponse(job).manifest?.tracks.map((track) => track.title), ["Second first", "First second"]);
-  } finally { await removeJob(job.id); }
-  await assert.rejects(stat(job.dir), { code: "ENOENT" });
-});
-test("download errors, timeout, excessive output, corrupt manifest and cancellation remove files", async () => {
-  for (const mode of ["exit", "timeout", "output", "manifest", "cancel"]) {
-    const fake = fakeProcess();
-    const job = await createJob("https://music.youtube.com/playlist?list=PL_Test", { ...fake, timeoutMs: mode === "timeout" ? 10 : 10000 });
-    if (mode === "exit") { fake.child.stderr.write("Missing required dependencies"); fake.child.emit("close", 1); }
-    if (mode === "output") fake.child.stdout.write("x".repeat(128 * 1024 + 1));
-    if (mode === "manifest") {
-      await writeFile(path.join(job.dir, "manifest.json"), '{"tracks":[]}');
-      fake.child.emit("close", 0);
+    if (url.pathname === "/upload/drive/v3/files") {
+      const body = Buffer.from(init?.body as Buffer);
+      const text = body.toString("utf8"), metadataStart = text.indexOf("\r\n\r\n") + 4;
+      const metadata = JSON.parse(text.slice(metadataStart, text.indexOf("\r\n--", metadataStart)));
+      const contentStart = body.indexOf("\r\n\r\n", body.indexOf("\r\n--", metadataStart)) + 4;
+      const content = body.subarray(contentStart, body.lastIndexOf("\r\n--"));
+      const id = `created-${++counter}`, file = { id, ...metadata, size: String(content.length) };
+      files.set(id, file); contents.set(id, content); return Response.json(file);
     }
-    if (mode === "cancel") await removeJob(job.id);
-    else { await waitState(job, "error"); await removeJob(job.id); }
-    await assert.rejects(stat(job.dir), { code: "ENOENT" });
-  }
-});
-test("downloader failures have safe, specific messages and preserve no raw stderr", async () => {
-  const cases = [
-    ["Missing required dependencies", "DEPENDENCIES_MISSING", /dependencies/],
-    ["Playlists must contain 1–20 tracks", "TRACK_COUNT_LIMIT", /1–20/],
-    ["File size limit exceeded", "TRACK_SIZE_LIMIT", /24 MB/],
-    ["Track exceeds the 12 minute limit", "TRACK_DURATION_LIMIT", /12-minute/],
-    ["ERROR: Sign in to confirm you're not a bot", "SOURCE_ACCESS_BLOCKED", /YouTube is refusing/],
-    ["HTTP Error 403: Forbidden", "SOURCE_ACCESS_BLOCKED", /public playlist can still be blocked/],
-    ["Postprocessing: ffmpeg failed", "CONVERSION_FAILED", /converted to MP3/],
-    ["Unable to download video data: timed out", "SOURCE_CONNECTION_FAILED", /could not finish downloading/],
-    ["No playable tracks downloaded", "NO_PLAYABLE_TRACKS", /playlist itself is public/],
-    ["Permission denied: /tmp/private-file", "OUTPUT_FAILED", /could not save/],
-    ["Unexpected failure https://example.test?token=private-data", "PREPARATION_FAILED", /not necessarily mean/],
-  ] as const;
-  for (const [stderr, reason, expected] of cases) {
-    const failure = downloaderFailure(stderr);
-    assert.equal(failure.reason, reason);
-    assert.match(failure.message, expected);
-    assert.doesNotMatch(failure.message, /private-data|private-file|example\.test/);
-  }
-  const fake = fakeProcess();
-  const job = await createJob("https://music.youtube.com/playlist?list=A", fake);
-  try {
-    fake.child.stderr.write("HTTP Error 403: Forbidden https://example.test?token=private-data");
-    fake.child.emit("close", 1);
-    await waitState(job, "error");
-    fake.child.stdout.write(JSON.stringify({ message: "Late progress", completed: 1, total: 2 }) + "\n");
-    assert.match(jobResponse(job).message, /YouTube is refusing/);
-    assert.doesNotMatch(jobResponse(job).message, /private-data|example\.test/);
-  } finally { await removeJob(job.id); }
-});
-test("global concurrency admits two downloads and rejects a third", async () => {
-  const one = await createJob("https://music.youtube.com/playlist?list=A", fakeProcess());
-  const two = await createJob("https://music.youtube.com/playlist?list=B", fakeProcess());
-  try { await assert.rejects(createJob("https://music.youtube.com/playlist?list=C", fakeProcess()), /busy/); }
-  finally { await removeJob(one.id); await removeJob(two.id); }
-});
-test("expired rate-limit clients release capacity for new players", (context) => {
-  let now = Date.now() - 31 * 60_000;
-  context.mock.method(Date, "now", () => now);
-  const request = (ip: string) => {
-    let admitted = false, status = 200;
-    const res = {
-      status(code: number) { status = code; return res; },
-      json() { return res; },
-      setHeader() {},
-    };
-    playlistRateLimit({ ip, method: "GET" } as Request, res as unknown as Response, () => { admitted = true; });
-    return { admitted, status };
+    if (url.pathname === "/drive/v3/files") {
+      const folder = url.searchParams.get("q")?.match(/^'([^']+)'/)?.[1];
+      return Response.json({ files: [...files.values()].filter(file => file.parents?.includes(folder!) && !file.trashed) });
+    }
+    const id = url.pathname.split("/").pop()!;
+    const file = files.get(id);
+    if (!file) return Response.json({}, { status: 404 });
+    if (url.searchParams.get("alt") === "media") return new Response(contents.get(id) as unknown as BodyInit);
+    return Response.json(file);
   };
-  for (let index = 0; index < 1000; index++) {
-    assert.equal(request(`capacity-test-${index}`).admitted, true);
-  }
-  assert.deepEqual(request("new-player"), { admitted: false, status: 429 }, "unexpired capacity is bounded");
-  now += 30 * 60_000 + 1;
-  assert.deepEqual(request("new-player"), { admitted: true, status: 200 }, "expired entries release slots at exactly 1000 clients");
-  assert.equal(request("another-new-player").admitted, true);
+  return { files, contents, calls, library: new DriveLibrary(request, "music"), fail: (status: number) => { failure = status; } };
+}
+test("lists MP3s only in designated folder and retrieves validated audio", async () => {
+  const drive = fakeDrive();
+  drive.files.set("bad", { id: "bad", name: "oversize.mp3", mimeType: "audio/mpeg", size: String(MAX_TRACK_BYTES + 1), parents: ["music"] });
+  assert.deepEqual((await drive.library.library()).map(track => track.id), ["A", "B", "C"]);
+  assert.deepEqual(await drive.library.audio("A"), mp3);
+  await assert.rejects(() => drive.library.audio("outside"), /not in the music library/);
+  assert.ok(!drive.calls.some(path => path.includes("outside?alt=media")));
+  drive.contents.set("A", Buffer.from("invalid"));
+  await assert.rejects(() => drive.library.audio("A"), /changed/);
 });
-test("API rejects invalid URLs, unknown jobs, arbitrary track paths and oversized bodies", async () => {
-  const server = app.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/api`;
+test("shared playlists save ordered references, load and never overwrite", async () => {
+  const drive = fakeDrive();
+  const saved = await drive.library.save("Test", ["C", "A", "B"]);
+  assert.equal(saved.name, "Test");
+  assert.deepEqual(JSON.parse(drive.contents.get(saved.id)!.toString()), { version: 1, trackIds: ["C", "A", "B"] });
+  assert.deepEqual((await drive.library.load(saved.id)).tracks.map(track => track.id), ["C", "A", "B"]);
+  assert.deepEqual(await drive.library.playlists(), [saved]);
+  await assert.rejects(() => drive.library.save("test.json", ["A"]), /already exists/);
+  await assert.rejects(() => drive.library.save("Empty", []), /1–20/);
+  await assert.rejects(() => drive.library.save("Dupe", ["A", "A"]), /distinct/);
+  await assert.rejects(() => drive.library.save("Outside", ["outside"]), /not in/);
+  await assert.rejects(() => drive.library.load("A"), /not in the shared/);
+  drive.contents.set(saved.id, Buffer.from("not json"));
+  await assert.rejects(() => drive.library.load(saved.id), /invalid JSON/);
+});
+test("creates dedicated playlist child folder and rejects oversized or unsafe definitions", async () => {
+  const drive = fakeDrive();
+  drive.files.delete("songs");
+  const id = await drive.library.playlistFolder();
+  assert.deepEqual(drive.files.get(id)?.parents, ["music"]);
+  assert.equal(drive.files.get(id)?.name, "AudioStrike Playlists");
+  for (const value of ["../file", "", "https://evil"]) assert.throws(() => fileId(value));
+  for (const value of ["../name", ".", "\u0000"]) assert.throws(() => playlistName(value));
+  assert.equal(playlistName("  Good.json  "), "Good.json");
+  await assert.rejects(() => readBounded(new Response(new Uint8Array(10)), 9), /size/);
+  await assert.rejects(() => validateMp3(Buffer.from("ID3notanmp3")), /valid MP3/);
+  await validateMp3(mp3);
+});
+test("playlist limits, deleted references, changed parents and concurrent saves fail explicitly", async () => {
+  const drive = fakeDrive();
+  const maxTracks = Array.from({ length: 21 }, (_, i) => `track-${i}`);
+  for (const id of maxTracks) drive.files.set(id, { id, name: `${id}.mp3`, mimeType: "audio/mpeg", size: String(MAX_TRACK_BYTES), parents: ["music"] });
+  await assert.rejects(() => drive.library.selected(maxTracks), /1–20/);
+  await assert.rejects(() => drive.library.selected(maxTracks.slice(0, 9)), /192 MB/);
+  const results = await Promise.allSettled([drive.library.save("Concurrent", ["A"]), drive.library.save("Concurrent", ["A"])]);
+  assert.equal(results.filter(result => result.status === "fulfilled").length, 1);
+  const saved = await drive.library.save("Missing", ["B"]);
+  drive.files.delete("B");
+  await assert.rejects(() => drive.library.load(saved.id), /unavailable/);
+  drive.files.get(saved.id)!.parents = ["private"];
+  await assert.rejects(() => drive.library.load(saved.id), /not in the shared/);
+  await assert.rejects(() => drive.library.upload("../song.mp3", mp3), /filename/);
+  await assert.rejects(() => drive.library.upload("song.wav", mp3), /MP3 filename/);
+  await assert.rejects(() => drive.library.upload("song.mp3", Buffer.alloc(MAX_TRACK_BYTES + 1)), /24 MB/);
+});
+test("Drive failures are actionable and never expose provider response or authorization", async () => {
+  const drive = fakeDrive();
+  drive.fail(403);
+  await assert.rejects(() => drive.library.library(), error => {
+    assert.match((error as Error).message, /access was denied/);
+    assert.doesNotMatch((error as Error).message, /token|private/); return true;
+  });
+  const missing = new DriveLibrary(async () => { throw new Error("secret token"); }, "music");
+  await assert.rejects(() => missing.library(), /unavailable or timed out/);
+});
+test("owner upload requires signed cookie; invalid login, forged cookie and cross-origin blocked", async () => {
+  process.env.AUDIOSTRIKE_OWNER_PASSWORD = "test-only-owner-password";
+  process.env.SESSION_SECRET = "test-only-session-key";
+  const drive = fakeDrive(), app = express();
+  app.use(express.json({ limit: "4kb" }));
+  app.use("/api", createPlaylistRouter(drive.library));
+  const server = app.listen(0);
+  await new Promise<void>(resolve => server.once("listening", resolve));
+  const address = server.address() as { port: number }, base = `http://127.0.0.1:${address.port}/api/playlists`;
+  const upload = (cookie?: string, body = mp3) => fetch(`${base}/upload`, { method: "POST",
+    headers: { "Content-Type": "audio/mpeg", "X-Filename": "new.mp3", ...(cookie ? { Cookie: cookie } : {}) }, body });
   try {
-    const response = await fetch(`${base}/playlists`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: "https://evil.test/playlist?list=x" }) });
-    assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /public/);
-    assert.equal((await fetch(`${base}/playlists/unknown`)).status, 404);
-    assert.equal((await fetch(`${base}/playlists/11111111-1111-4111-8111-111111111111/tracks/etc`)).status, 404);
-    const oversized = await fetch(`${base}/playlists`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: "x".repeat(6000) }) });
-    assert.equal(oversized.status, 413);
-    assert.match((await oversized.json()).error, /4 KB/);
-    // Full API success and MP3 retrieval with the supplied runner's validated output.
-    const fake = fakeProcess();
-    const job = await createJob("https://music.youtube.com/playlist?list=A", fake);
-    await writeFile(path.join(job.dir, "0001.mp3"), "mp3");
-    await writeFile(path.join(job.dir, "manifest.json"), JSON.stringify({ version: 1, skipped: 0, tracks: [{ file: "0001.mp3", title: "A" }] }));
-    fake.child.emit("close", 0);
-    await waitState(job, "ready");
-    assert.equal((await fetch(`${base}/playlists/${job.id}`)).status, 200);
-    const audio = await fetch(`${base}/playlists/${job.id}/tracks/0`);
-    assert.match(audio.headers.get("content-type")!, /audio\/mpeg/);
-    assert.equal(await audio.text(), "mp3");
-    assert.equal((await fetch(`${base}/playlists/${job.id}`, { method: "DELETE" })).status, 204);
-    assert.equal((await fetch(`${base}/playlists/${job.id}`)).status, 404);
-    let rateLimited = false;
-    for (let index = 0; index < 121; index++) {
-      const response = await fetch(`${base}/playlists/unknown`);
-      if (response.status === 429) {
-        assert.equal(response.headers.get("retry-after"), "60");
-        rateLimited = true; break;
-      }
-    }
-    assert.equal(rateLimited, true, "polling is rate limited");
-  } finally { await new Promise<void>((resolve) => server.close(() => resolve())); }
+    assert.equal((await upload()).status, 403);
+    assert.equal((await upload("audiostrike_owner=123.forged")).status, 403);
+    const wrong = await fetch(`${base}/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "wrong" }) });
+    assert.equal(wrong.status, 401);
+    const login = await fetch(`${base}/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: process.env.AUDIOSTRIKE_OWNER_PASSWORD }) });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get("set-cookie")!;
+    assert.match(cookie, /HttpOnly/i); assert.match(cookie, /SameSite=Strict/i);
+    const uploaded = await upload(cookie);
+    assert.equal(uploaded.status, 201);
+    assert.equal((await uploaded.json() as { title: string }).title, "new.mp3");
+    assert.equal((await upload(cookie, Buffer.from("not mp3"))).status, 422);
+    const crossOrigin = await fetch(`${base}/upload`, { method: "POST", headers: { Cookie: cookie, Origin: "https://evil.test", "Content-Type": "audio/mpeg" }, body: mp3 });
+    assert.equal(crossOrigin.status, 403);
+    const list = await fetch(`${base}/library`);
+    assert.equal(list.status, 200);
+    const saved = await fetch(base, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Public", trackIds: ["A"] }) });
+    assert.equal(saved.status, 201);
+    const id = (await saved.json() as { id: string }).id;
+    assert.equal((await fetch(`${base}/${id}`)).status, 200);
+    assert.equal((await fetch(`${base}/audio/A`)).status, 200);
+    const statuses = [];
+    for (let i = 0; i < 6; i++) statuses.push((await fetch(`${base}/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"password":"wrong"}' })).status);
+    assert.ok(statuses.includes(429));
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });

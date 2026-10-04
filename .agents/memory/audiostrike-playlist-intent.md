@@ -1,16 +1,16 @@
 ---
 name: AudioStrike playlist intent
-description: User permission to adapt the supplied downloader and the intended continuous playlist pairing.
+description: Drive-library scope and the intended continuous playlist pairing.
 ---
 
-Keep all downloading inside the user's supplied stream2mp3.py; modifying it for the game's needs is allowed.
+Use the owner's designated Google Drive music folder, not YouTube downloading or separate local stage/boss selectors. Playlists are a shared library of references, not per-player private data; only the owner adds MP3s.
 
-**Why:** The user provided the script and explicitly said, "Please feel free to read, and modify the script as needed for the purpose of the game." They did not request a replacement downloader.
+**Why:** The user requested replacing unreliable YouTube access with Drive music and explicitly excluded general player accounts and private playlists.
 
-**How to apply:** Extend its game adapter when downloader behavior changes rather than adding a separate downloader to the API.
+**How to apply:** Keep Drive authorization server-side and scope music and playlist operations to the designated folders. Do not expand into player accounts or private playlists without a new request.
 
 Pair the playlist continuously across its boundary, rather than padding or discarding an odd last track. Shuffle once at the start and retain that order for replay.
 
 **Why:** The agreed playlist behavior maps adjacent songs to stage/boss roles and loops; retaining the odd last song avoids losing user-selected music.
 
-**How to apply:** An A/B/C list produces A/B, C/A, B/C, then repeats. A single song supplies both roles. Both uploaded files still use the same pairing path.
+**How to apply:** An A/B/C list produces A/B, C/A, B/C, then repeats. A single song supplies both roles.

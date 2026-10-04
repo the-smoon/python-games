@@ -99,3 +99,8 @@ timeoutMs = 20000
 [nix]
 channel = "stable-25_05"
 packages = ["SDL2", "SDL2_image", "SDL2_mixer", "SDL2_ttf", "ffmpeg-full", "fontconfig", "freetype", "libjpeg", "libpng", "libsndfile", "pkg-config", "portmidi"]
+
+[userenv]
+
+[userenv.shared]
+AUDIOSTRIKE_MUSIC_FOLDER_ID = "1tWnqQv0-O6cY9l5yfA-EOvtoS7iJWp0l"

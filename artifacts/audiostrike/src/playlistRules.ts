@@ -26,33 +26,16 @@ export function moveTrack<T>(tracks: readonly T[], from: number, to: number): T[
   result.splice(to, 0, ...result.splice(from, 1));
   return result;
 }
-export function uploadedManifest(stage: File, boss: File): TrackManifest<LocalTrack> {
-  return { version: 1, tracks: [
-    { id: 'stage', title: stage.name, file: stage },
-    { id: 'boss', title: boss.name, file: boss },
-  ] };
-}
-
-export type RemotePlaylist = {
-  id: string; state: 'downloading' | 'ready' | 'error'; message: string; completed: number; total: number;
-  manifest?: { version: 1; skipped: number; tracks: { id: string; title: string; url: string }[] };
-};
-export function validateRemotePlaylist(value: unknown): RemotePlaylist {
-  const job = value as RemotePlaylist;
-  if (!job || typeof job.id !== 'string' || !/^[a-f0-9-]{36}$/.test(job.id) ||
-      !['downloading', 'ready', 'error'].includes(job.state) || typeof job.message !== 'string' ||
-      !Number.isInteger(job.completed) || !Number.isInteger(job.total) ||
-      job.completed < 0 || job.total < job.completed || job.total > 20) throw new Error('Invalid playlist response');
-  if (job.state === 'ready') {
-    const manifest = job.manifest;
-    if (!manifest || manifest.version !== 1 || !Array.isArray(manifest.tracks) || !manifest.tracks.length ||
-        manifest.tracks.length > 20 || !Number.isInteger(manifest.skipped) || manifest.skipped < 0) throw new Error('Invalid playlist manifest');
-    manifest.tracks.forEach((track, i) => {
-      if (!track || track.id !== String(i) || typeof track.title !== 'string' || !track.title.length ||
-          track.title.length > 200 || track.url !== `/api/playlists/${job.id}/tracks/${i}`) {
-        throw new Error('Unsafe playlist track reference');
-      }
-    });
+export function validateLocalPlaylist(tracks: readonly LocalTrack[]) {
+  if (!tracks.length || tracks.length > 20) throw new Error('Choose a playlist of 1–20 library tracks');
+  let bytes = 0;
+  const seen = new Set<string>();
+  for (const track of tracks) {
+    if (!/^[A-Za-z0-9_-]{1,200}$/.test(track.id) || seen.has(track.id) || !track.title ||
+        !(track.file instanceof File) || !track.file.size || track.file.size > 24 * 1024 * 1024 ||
+        track.file.type !== 'audio/mpeg') throw new Error('Choose valid MP3 tracks from the Drive library');
+    seen.add(track.id);
+    bytes += track.file.size;
   }
-  return job;
+  if (bytes > 192 * 1024 * 1024) throw new Error('Playlist exceeds 192 MB');
 }

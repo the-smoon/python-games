@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { selectMockPlaylist } from './drivePlaylistFixture.mjs';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
@@ -21,9 +22,7 @@ test('real pickups drive ranked weapons, shield, companions, freeze, piercing la
     await page.clock.install();
     await page.addInitScript(() => { window.__AUDIOSTRIKE_TEST_MODE__ = true; });
     assert.equal((await page.goto(url))?.status(), 200);
-    for (const kind of ['stage', 'boss']) {
-      await page.getByTestId(`input-${kind}-file`).setInputFiles({ name: `${kind}.wav`, mimeType: 'audio/wav', buffer: silentWav() });
-    }
+    await selectMockPlaylist(page, ['stage', 'boss'].map(kind => ({ name: `${kind}.mp3`, buffer: silentWav() })));
     await page.getByTestId('button-analyze').click();
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
     const snap = () => page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot());

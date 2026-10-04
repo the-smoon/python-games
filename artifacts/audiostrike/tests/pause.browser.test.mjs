@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { selectMockPlaylist } from './drivePlaylistFixture.mjs';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
@@ -36,11 +37,7 @@ test('touch and keyboard pause preserve stage, crossfade, boss, and weapon timin
     await page.clock.install();
     await page.addInitScript(() => { window.__AUDIOSTRIKE_TEST_MODE__ = true; });
     await page.goto(process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/');
-    for (const kind of ['stage', 'boss']) {
-      await page.getByTestId(`input-${kind}-file`).setInputFiles({
-        name: `${kind}.wav`, mimeType: 'audio/wav', buffer: toneWav(),
-      });
-    }
+    await selectMockPlaylist(page, ['stage', 'boss'].map(kind => ({ name: `${kind}.mp3`, buffer: toneWav() })));
     await page.getByTestId('button-analyze').tap();
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
     const snapshot = () => page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot());

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { selectMockPlaylist } from './drivePlaylistFixture.mjs';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
@@ -110,8 +111,7 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
     });
     const response = await page.goto(url);
     assert.equal(response?.status(), 200, `AudioStrike preview must be running at ${url}`);
-    await page.locator('[data-testid="input-stage-file"]').setInputFiles({ name: 'stage.wav', mimeType: 'audio/wav', buffer: silentWav() });
-    await page.locator('[data-testid="input-boss-file"]').setInputFiles({ name: 'boss.wav', mimeType: 'audio/wav', buffer: silentWav() });
+    await selectMockPlaylist(page, [{ name: 'stage.mp3', buffer: silentWav() }, { name: 'boss.mp3', buffer: silentWav() }]);
     await page.locator('[data-testid="button-analyze"]').click();
     await page.locator('[data-testid="text-stage-time"]').waitFor({ timeout: 8000 });
 
@@ -237,8 +237,7 @@ test('contrasting audio, boss detachment and reused tracks survive two level han
     const page = await browser.newPage();
     await page.clock.install();
     await page.goto(url);
-    await page.getByTestId('input-stage-file').setInputFiles({ name: 'bass.wav', mimeType: 'audio/wav', buffer: toneWav(100) });
-    await page.getByTestId('input-boss-file').setInputFiles({ name: 'bright.wav', mimeType: 'audio/wav', buffer: toneWav(3000) });
+    await selectMockPlaylist(page, [{ name: 'bass.mp3', buffer: toneWav(100) }, { name: 'bright.mp3', buffer: toneWav(3000) }]);
     await page.getByTestId('button-analyze').click();
     await page.getByTestId('text-stage-time').waitFor({ timeout: 8000 });
     await page.clock.runFor(1600);
