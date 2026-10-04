@@ -25,7 +25,8 @@ import type {
   OwnerStatus,
   PlaylistSummary,
   SavePlaylistInput,
-  SavedPlaylist
+  SavedPlaylist,
+  SongAnalysisDocument
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -196,6 +197,143 @@ export function useGetMusicLibrary<TData = Awaited<ReturnType<typeof getMusicLib
 
 
 
+
+export const getGetSongAnalysisUrl = (hash: string,) => {
+
+
+
+
+  return `/api/song-analysis/${hash}`
+}
+
+export const getSongAnalysis = async (hash: string, options?: RequestInit): Promise<SongAnalysisDocument> => {
+
+  return customFetch<SongAnalysisDocument>(getGetSongAnalysisUrl(hash),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetSongAnalysisQueryKey = (hash: string,) => {
+    return [
+    `/api/song-analysis/${hash}`
+    ] as const;
+    }
+
+
+export const getGetSongAnalysisQueryOptions = <TData = Awaited<ReturnType<typeof getSongAnalysis>>, TError = ErrorType<void>>(hash: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSongAnalysis>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetSongAnalysisQueryKey(hash);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getSongAnalysis>>> = ({ signal }) => getSongAnalysis(hash, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: hash !== null && hash !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getSongAnalysis>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetSongAnalysisQueryResult = NonNullable<Awaited<ReturnType<typeof getSongAnalysis>>>
+export type GetSongAnalysisQueryError = ErrorType<void>
+
+
+
+export function useGetSongAnalysis<TData = Awaited<ReturnType<typeof getSongAnalysis>>, TError = ErrorType<void>>(
+ hash: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getSongAnalysis>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetSongAnalysisQueryOptions(hash,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getStoreSongAnalysisUrl = (hash: string,) => {
+
+
+
+
+  return `/api/song-analysis/${hash}`
+}
+
+export const storeSongAnalysis = async (hash: string,
+    songAnalysisDocument: SongAnalysisDocument, options?: RequestInit): Promise<SongAnalysisDocument> => {
+
+  return customFetch<SongAnalysisDocument>(getStoreSongAnalysisUrl(hash),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(songAnalysisDocument)
+  }
+);}
+
+
+
+
+
+export const getStoreSongAnalysisMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof storeSongAnalysis>>, TError,{hash: string;data: BodyType<SongAnalysisDocument>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof storeSongAnalysis>>, TError,{hash: string;data: BodyType<SongAnalysisDocument>}, TContext> => {
+
+const mutationKey = ['storeSongAnalysis'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof storeSongAnalysis>>, {hash: string;data: BodyType<SongAnalysisDocument>}> = (props) => {
+          const {hash,data} = props ?? {};
+
+          return  storeSongAnalysis(hash,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StoreSongAnalysisMutationResult = NonNullable<Awaited<ReturnType<typeof storeSongAnalysis>>>
+    export type StoreSongAnalysisMutationBody = BodyType<SongAnalysisDocument>
+    export type StoreSongAnalysisMutationError = ErrorType<unknown>
+
+    export const useStoreSongAnalysis = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof storeSongAnalysis>>, TError,{hash: string;data: BodyType<SongAnalysisDocument>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof storeSongAnalysis>>,
+        TError,
+        {hash: string;data: BodyType<SongAnalysisDocument>},
+        TContext
+      > => {
+      return useMutation(getStoreSongAnalysisMutationOptions(options));
+    }
 
 export const getGetDriveAudioUrl = (id: string,) => {
 

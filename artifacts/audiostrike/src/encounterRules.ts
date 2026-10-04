@@ -12,7 +12,7 @@ export type AudioSignals = {
 
 export type AttackPattern = 'TRACK' | 'BURST' | 'RADIAL' | 'SPIRAL' | 'WAVE';
 export type MotionPattern = 'ORBIT' | 'SWEEP' | 'CHASE' | 'DASH' | 'ZIGZAG';
-export type ShapeIdentity = 'CIRCLE' | 'DIAMOND' | 'TRIANGLE' | 'HEX' | 'RING';
+export type ShapeIdentity = 'CIRCLE' | 'DIAMOND' | 'TRIANGLE' | 'HEX' | 'RING' | 'SQUARE' | 'RECTANGLE' | 'OVAL' | 'ELBOW' | 'CAPSULE';
 
 export type FormProfile = {
   sides: number;
@@ -20,6 +20,8 @@ export type FormProfile = {
   spikes: number;
   innerRadius: number;
   rotation: number;
+  widthScale: number;
+  heightScale: number;
 };
 
 const clamp = (value: number, min: number, max: number) =>
@@ -80,6 +82,8 @@ export function generateForm(signal: AudioSignals, serial: number, scale = 1): F
     spikes: Math.round(clamp(high * 7 + onset * 5 + (signal.pulse ? 2 : 0) + (variation % 4), 0, 16)),
     innerRadius: Number(clamp((0.24 + flatness * 0.25 + high * 0.12 + (variation % 5) * 0.025) * safeScale, 0.18, 0.72).toFixed(3)),
     rotation: Number(((((safeSerial * 0.37 + centroid * Math.PI * 2 + low * 1.4) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2)) - Math.PI).toFixed(3)),
+    widthScale: Number(clamp(.72 + low * .36 + mid * .12, .7, 1.1).toFixed(3)),
+    heightScale: Number(clamp(.72 + high * .36 + onset * .12, .7, 1.1).toFixed(3)),
   };
 }
 
@@ -125,6 +129,11 @@ const SHAPE_MOTION_BIAS: Record<ShapeIdentity, Partial<Record<MotionPattern, num
   TRIANGLE: { DASH: .34, CHASE: .13 },
   HEX: { SWEEP: .3, ORBIT: .18 },
   RING: { ORBIT: .34, ZIGZAG: .14 },
+  SQUARE: { SWEEP: .28, CHASE: .15 },
+  RECTANGLE: { SWEEP: .32, ZIGZAG: .12 },
+  OVAL: { ORBIT: .3, CHASE: .16 },
+  ELBOW: { ORBIT: .26, ZIGZAG: .24 },
+  CAPSULE: { DASH: .22, SWEEP: .22 },
 };
 
 export function blendAudioSignals(structure: AudioSignals, live: AudioSignals, liveWeight = .34): AudioSignals {

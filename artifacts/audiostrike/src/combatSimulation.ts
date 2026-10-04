@@ -1,7 +1,7 @@
 import type { EnemyEntity, PlayerEntity } from './gameRuntimeTypes';
-import { audioIntensity, type AttackPattern, type ShapeIdentity } from './encounterRules';
+import { audioIntensity, type AttackPattern, type ShapeIdentity } from './encounterRules.ts';
 import type { LiveFeatures, ProjectileKind, ActiveBoss, Behavior, EnemyBulletEntity } from './gameRuntimeTypes';
-import { slowScale } from './weaponRules';
+import { slowScale } from './weaponRules.ts';
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
@@ -16,7 +16,7 @@ export function chooseBehavior(features: LiveFeatures): Behavior {
 }
 
 export function chooseEnemyShape(features: LiveFeatures, serial: number, musicalIdentity?: ShapeIdentity): ShapeIdentity {
-  const shapes: ShapeIdentity[] = ['CIRCLE', 'DIAMOND', 'TRIANGLE', 'HEX', 'RING'];
+  const shapes: ShapeIdentity[] = ['CIRCLE', 'SQUARE', 'TRIANGLE', 'RECTANGLE', 'OVAL', 'ELBOW', 'CAPSULE', 'DIAMOND', 'HEX', 'RING'];
   if (musicalIdentity && Math.abs(Math.trunc(serial)) % 3 === 0) return musicalIdentity;
   return shapes[(serial + Math.floor(features.centroid * 5 + features.low * 3)) % shapes.length];
 }
@@ -96,12 +96,18 @@ function moveEnemy(
   enemy: EnemyEntity, player: Pick<PlayerEntity, 'x' | 'y'>, live: LiveFeatures,
   delta: number, width: number, now: number,
 ) {
-  const enemyDelta = delta * slowScale(enemy, now);
+  if ((enemy.stunnedUntil ?? 0) > now) return 0;
+  const confused = (enemy.confusedUntil ?? 0) > now;
+  const buffed = (enemy.buffUntil ?? 0) > now;
+  const enemyDelta = delta * slowScale(enemy, now) * (confused ? .28 : buffed ? 1.35 : 1);
   enemy.frame += enemyDelta;
   const movement = enemy.speed * enemyDelta * .18 * (1 + audioIntensity(live) * .3);
   if (enemy.exiting) {
     enemy.fireRate = 0;
     enemy.y += (12 + enemy.speed * 2.2) * delta;
+  } else if (confused) {
+    enemy.x += Math.sin(enemy.frame * .18 + enemy.formX) * movement * 2.8;
+    enemy.y += (Math.cos(enemy.frame * .15 + enemy.formX * .1) * 1.8 + .15) * movement;
   } else if (enemy.motion === 'ORBIT') {
     enemy.formY += movement * .65;
     enemy.y += (enemy.formY + Math.cos(enemy.frame * .06) * 15 - enemy.y) * .08 * enemyDelta;
@@ -145,7 +151,7 @@ export type ArenaBounds = Readonly<{
 }>;
 
 export interface CombatSimulation {
-  movePlayer(player: PlayerEntity, input: CombatInput, delta: number, bossEncounter: boolean): void;
+  movePlayer(player: PlayerEntity, input: CombatInput, delta: number, bossEncounter: boolean, now?: number): void;
   moveBoss(boss: ActiveBoss, player: Pick<PlayerEntity, 'x' | 'y'>, live: LiveFeatures, delta: number): void;
   moveEnemy(
     enemy: EnemyEntity, player: Pick<PlayerEntity, 'x' | 'y'>, live: LiveFeatures,
@@ -156,9 +162,10 @@ export interface CombatSimulation {
 
 /** Deterministic player motion and contact geometry shared by the live combat loop. */
 export class FrameCombatSimulation implements CombatSimulation {
-  constructor(private readonly bounds: ArenaBounds) {}
+  private readonly bounds: ArenaBounds;
+  constructor(bounds: ArenaBounds) { this.bounds = bounds; }
 
-  movePlayer(player: PlayerEntity, input: CombatInput, delta: number, bossEncounter: boolean) {
+  movePlayer(player: PlayerEntity, input: CombatInput, delta: number, bossEncounter: boolean, now = 0) {
     const { width, height, maxSpeed, acceleration, deceleration } = this.bounds;
     let x = input.x;
     let y = input.y;
@@ -170,8 +177,9 @@ export class FrameCombatSimulation implements CombatSimulation {
       x = 0;
       y = 0;
     }
-    const targetVx = x * maxSpeed;
-    const targetVy = y * maxSpeed;
+    const speedScale = (player.debuffUntil ?? 0) > now ? .65 : 1;
+    const targetVx = x * maxSpeed * speedScale;
+    const targetVy = y * maxSpeed * speedScale;
     const changeX = targetVx - player.vx;
     const changeY = targetVy - player.vy;
     const distance = Math.hypot(changeX, changeY);

@@ -11,3 +11,5 @@
 - [API codegen compatibility](api-codegen-compatibility.md) — formatted validators must match the installed Zod major version, not the generator's assumed default.
 - [Boss survival intent](audiostrike-boss-survival-intent.md) — surviving bosses must not delay scheduled arrivals; newest living boss owns the shared soundtrack.
 - [Direct Node tests for AudioStrike](audiostrike-direct-node-tests.md) — runtime imports loaded by Node tests need explicit `.ts` extensions even when Vite accepts extensionless imports.
+- [Geometric visuals and death effects](audiostrike-effects-intent.md) — clean forms, permanent composite boss hulls, bounded pixel/debris deaths, and non-boss disruption.
+- [Durable song analyses](audiostrike-analysis-cache.md) — reuse versioned numerical documents across sessions; prepare boundary designs without persisting song bytes or fallback analyses.

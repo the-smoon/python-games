@@ -3,11 +3,11 @@ export type PickupType = WeaponType | 'RAPID' | 'SHIELD' | 'REPAIR' | 'BOMB';
 export const WEAPON_BALANCE = {
   maxRank: 5, maxHealth: 100, switchRepairPerRank: 10, repairHP: 25,
   rapidSeconds: 10, shieldSeconds: 6, rapidMultiplier: 1.5,
-  companionHP: 20, companionOffset: 33,
+  companionHP: 90, companionOffset: 33, companionDamageMultiplier: 2.5,
   freezeSeconds: 3, freezeRadius: 48, slowMultiplier: .4,
   stoppedSpeed: .08, maxBullets: 320,
   weakEnemyDropChance: .025, strongEnemyDropBonus: .085, subBossDropChance: .25,
-  bossDropChance: .5, maxEnemyHealthForDropScaling: 22, dropPity: 24,
+  bossDropChance: .5, bossRepairChance: .12, maxEnemyHealthForDropScaling: 22, dropPity: 24,
   maxDrops: 10, dropSeconds: 12, dropSpeed: 55,
   bombWeakHealth: 8, bombEnemyDamage: 25, bombStrongHealthFraction: .55, bombBossDamage: 180,
 };
@@ -40,13 +40,15 @@ export function newWeaponState(): WeaponState {
 export function weaponStats(type: WeaponType, rank: number) {
   const r = Math.max(1, Math.min(WEAPON_BALANCE.maxRank, rank));
   return {
-    interval: type === 'TWIN' ? (8 - (r - 1) * .7) / 60 : .42 - (r - 1) * .025,
-    damage: type === 'TWIN' ? 1 + (r - 1) * .25 : 2.5 + (r - 1) * .5,
+    interval: type === 'TWIN' ? (8 - (r - 1) * .7) / 60 : .42 - (r - 1) * .03,
+    damage: type === 'TWIN' ? 1 + (r - 1) * .3 : 2.5 + (r - 1) * .875,
     pellets: 5 + (r - 1) * 2,
     laserWidth: 6 + (r - 1) * 5,
-    laserDamage: 95 + (r - 1) * 45,
+    laserDamage: 95 + (r - 1) * 38,
     laserCharge: .65 - (r - 1) * .1,
     laserCooldown: 1.6 - (r - 1) * .2,
+    spreadArc: 1.1 - (r - 1) * .125,
+    freezeEvery: r === 5 ? 8 : 10,
   };
 }
 export function collectPickup(state: WeaponState, type: PickupType, health: number, now: number) {
@@ -79,10 +81,10 @@ export function companionPositions(player: { x: number; y: number }, state: Weap
     y: player.y + 8, health, index,
   }));
 }
-export function fireWeapon(state: WeaponState, player: { x: number; y: number; vx: number; vy: number }, now: number) {
+export function fireWeapon(state: WeaponState, player: { x: number; y: number; vx: number; vy: number; debuffUntil?: number }, now: number) {
   const shots: PlayerShot[] = [];
   const stats = weaponStats(state.type, state.rank);
-  const boost = state.rapidUntil > now ? WEAPON_BALANCE.rapidMultiplier : 1;
+  const boost = (state.rapidUntil > now ? WEAPON_BALANCE.rapidMultiplier : 1) * ((player.debuffUntil ?? 0) > now ? .65 : 1);
   if (state.type === 'LASER') {
     if (Math.hypot(player.vx, player.vy) > WEAPON_BALANCE.stoppedSpeed) {
       state.chargeStartedAt = null;
@@ -102,12 +104,12 @@ export function fireWeapon(state: WeaponState, player: { x: number; y: number; v
   if (state.type === 'TWIN') {
     for (const offset of [-13, -7, 7, 13]) add(player.x + offset, player.y - 18, 0, -48);
     for (const companion of companionPositions(player, state)) {
-      if (companion.health > 0) add(companion.x, companion.y - 12, 0, -48);
+      if (companion.health > 0) add(companion.x, companion.y - 12, 0, -48, false, stats.damage * WEAPON_BALANCE.companionDamageMultiplier);
     }
   } else {
-    const freeze = state.volley % 10 === 0;
+    const freeze = state.volley % stats.freezeEvery === 0;
     for (let i = 0; i < stats.pellets; i++) {
-      const angle = -Math.PI / 2 + (i / (stats.pellets - 1) - .5) * 1.1;
+      const angle = -Math.PI / 2 + (i / (stats.pellets - 1) - .5) * stats.spreadArc;
       add(player.x, player.y - 18, Math.cos(angle) * 34, Math.sin(angle) * 34, freeze);
     }
   }
@@ -152,7 +154,7 @@ export function tickFrozenBullet(bullet: { frozenUntil?: number; alive: boolean 
 }
 export function pickDrop(roll: number): PickupType {
   const weighted: [PickupType, number][] = [
-    ['TWIN', 18], ['SPREAD', 18], ['LASER', 18], ['REPAIR', 16], ['SHIELD', 12], ['RAPID', 10], ['BOMB', 8],
+    ['TWIN', 22], ['SPREAD', 22], ['LASER', 22], ['REPAIR', 2], ['SHIELD', 14], ['RAPID', 12], ['BOMB', 6],
   ];
   let cursor = Math.max(0, Math.min(.999999, roll)) * 100;
   for (const [type, weight] of weighted) {

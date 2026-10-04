@@ -24,6 +24,280 @@ export const GetMusicLibraryResponseItem = zod.object({
 export const GetMusicLibraryResponse = zod.array(GetMusicLibraryResponseItem)
 
 
+export const getSongAnalysisPathHashRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const GetSongAnalysisParams = zod.object({
+  "hash": zod.coerce.string().regex(getSongAnalysisPathHashRegExp)
+})
+
+export const getSongAnalysisResponseDurationMax = 720;
+
+export const getSongAnalysisResponseAnalyzedSecondsMin = 0.001;
+export const getSongAnalysisResponseAnalyzedSecondsMax = 720;
+
+export const getSongAnalysisResponseSignatureRmsMin = 0;
+export const getSongAnalysisResponseSignatureRmsMax = 1;
+
+export const getSongAnalysisResponseSignatureOnsetMin = 0;
+export const getSongAnalysisResponseSignatureOnsetMax = 1;
+
+export const getSongAnalysisResponseSignatureLowMin = 0;
+export const getSongAnalysisResponseSignatureLowMax = 1;
+
+export const getSongAnalysisResponseSignatureMidMin = 0;
+export const getSongAnalysisResponseSignatureMidMax = 1;
+
+export const getSongAnalysisResponseSignatureHighMin = 0;
+export const getSongAnalysisResponseSignatureHighMax = 1;
+
+export const getSongAnalysisResponseSignatureCentroidMin = 0;
+export const getSongAnalysisResponseSignatureCentroidMax = 1;
+
+export const getSongAnalysisResponseSignatureFlatnessMin = 0;
+export const getSongAnalysisResponseSignatureFlatnessMax = 1;
+
+export const getSongAnalysisResponseSignatureTempoMin = 0;
+export const getSongAnalysisResponseSignatureTempoMax = 300;
+
+export const getSongAnalysisResponseMotifsItemRmsMin = 0;
+export const getSongAnalysisResponseMotifsItemRmsMax = 1;
+
+export const getSongAnalysisResponseMotifsItemOnsetMin = 0;
+export const getSongAnalysisResponseMotifsItemOnsetMax = 1;
+
+export const getSongAnalysisResponseMotifsItemLowMin = 0;
+export const getSongAnalysisResponseMotifsItemLowMax = 1;
+
+export const getSongAnalysisResponseMotifsItemMidMin = 0;
+export const getSongAnalysisResponseMotifsItemMidMax = 1;
+
+export const getSongAnalysisResponseMotifsItemHighMin = 0;
+export const getSongAnalysisResponseMotifsItemHighMax = 1;
+
+export const getSongAnalysisResponseMotifsItemCentroidMin = 0;
+export const getSongAnalysisResponseMotifsItemCentroidMax = 1;
+
+export const getSongAnalysisResponseMotifsItemFlatnessMin = 0;
+export const getSongAnalysisResponseMotifsItemFlatnessMax = 1;
+
+export const getSongAnalysisResponseMotifsItemTempoMin = 0;
+export const getSongAnalysisResponseMotifsItemTempoMax = 300;
+
+export const getSongAnalysisResponseMotifsMin = 8;
+export const getSongAnalysisResponseMotifsMax = 8;
+
+
+
+export const GetSongAnalysisResponse = zod.object({
+  "version": zod.literal(1),
+  "duration": zod.number().min(1).max(getSongAnalysisResponseDurationMax),
+  "analyzedSeconds": zod.number().min(getSongAnalysisResponseAnalyzedSecondsMin).max(getSongAnalysisResponseAnalyzedSecondsMax),
+  "signature": zod.object({
+  "rms": zod.number().min(getSongAnalysisResponseSignatureRmsMin).max(getSongAnalysisResponseSignatureRmsMax),
+  "onset": zod.number().min(getSongAnalysisResponseSignatureOnsetMin).max(getSongAnalysisResponseSignatureOnsetMax),
+  "low": zod.number().min(getSongAnalysisResponseSignatureLowMin).max(getSongAnalysisResponseSignatureLowMax),
+  "mid": zod.number().min(getSongAnalysisResponseSignatureMidMin).max(getSongAnalysisResponseSignatureMidMax),
+  "high": zod.number().min(getSongAnalysisResponseSignatureHighMin).max(getSongAnalysisResponseSignatureHighMax),
+  "centroid": zod.number().min(getSongAnalysisResponseSignatureCentroidMin).max(getSongAnalysisResponseSignatureCentroidMax),
+  "flatness": zod.number().min(getSongAnalysisResponseSignatureFlatnessMin).max(getSongAnalysisResponseSignatureFlatnessMax),
+  "pulse": zod.boolean(),
+  "tempo": zod.number().min(getSongAnalysisResponseSignatureTempoMin).max(getSongAnalysisResponseSignatureTempoMax)
+}),
+  "motifs": zod.array(zod.object({
+  "rms": zod.number().min(getSongAnalysisResponseMotifsItemRmsMin).max(getSongAnalysisResponseMotifsItemRmsMax),
+  "onset": zod.number().min(getSongAnalysisResponseMotifsItemOnsetMin).max(getSongAnalysisResponseMotifsItemOnsetMax),
+  "low": zod.number().min(getSongAnalysisResponseMotifsItemLowMin).max(getSongAnalysisResponseMotifsItemLowMax),
+  "mid": zod.number().min(getSongAnalysisResponseMotifsItemMidMin).max(getSongAnalysisResponseMotifsItemMidMax),
+  "high": zod.number().min(getSongAnalysisResponseMotifsItemHighMin).max(getSongAnalysisResponseMotifsItemHighMax),
+  "centroid": zod.number().min(getSongAnalysisResponseMotifsItemCentroidMin).max(getSongAnalysisResponseMotifsItemCentroidMax),
+  "flatness": zod.number().min(getSongAnalysisResponseMotifsItemFlatnessMin).max(getSongAnalysisResponseMotifsItemFlatnessMax),
+  "pulse": zod.boolean(),
+  "tempo": zod.number().min(getSongAnalysisResponseMotifsItemTempoMin).max(getSongAnalysisResponseMotifsItemTempoMax)
+})).min(getSongAnalysisResponseMotifsMin).max(getSongAnalysisResponseMotifsMax)
+})
+
+
+export const storeSongAnalysisPathHashRegExp = new RegExp('^[a-f0-9]{64}$');
+
+
+export const StoreSongAnalysisParams = zod.object({
+  "hash": zod.coerce.string().regex(storeSongAnalysisPathHashRegExp)
+})
+
+export const storeSongAnalysisBodyDurationMax = 720;
+
+export const storeSongAnalysisBodyAnalyzedSecondsMin = 0.001;
+export const storeSongAnalysisBodyAnalyzedSecondsMax = 720;
+
+export const storeSongAnalysisBodySignatureRmsMin = 0;
+export const storeSongAnalysisBodySignatureRmsMax = 1;
+
+export const storeSongAnalysisBodySignatureOnsetMin = 0;
+export const storeSongAnalysisBodySignatureOnsetMax = 1;
+
+export const storeSongAnalysisBodySignatureLowMin = 0;
+export const storeSongAnalysisBodySignatureLowMax = 1;
+
+export const storeSongAnalysisBodySignatureMidMin = 0;
+export const storeSongAnalysisBodySignatureMidMax = 1;
+
+export const storeSongAnalysisBodySignatureHighMin = 0;
+export const storeSongAnalysisBodySignatureHighMax = 1;
+
+export const storeSongAnalysisBodySignatureCentroidMin = 0;
+export const storeSongAnalysisBodySignatureCentroidMax = 1;
+
+export const storeSongAnalysisBodySignatureFlatnessMin = 0;
+export const storeSongAnalysisBodySignatureFlatnessMax = 1;
+
+export const storeSongAnalysisBodySignatureTempoMin = 0;
+export const storeSongAnalysisBodySignatureTempoMax = 300;
+
+export const storeSongAnalysisBodyMotifsItemRmsMin = 0;
+export const storeSongAnalysisBodyMotifsItemRmsMax = 1;
+
+export const storeSongAnalysisBodyMotifsItemOnsetMin = 0;
+export const storeSongAnalysisBodyMotifsItemOnsetMax = 1;
+
+export const storeSongAnalysisBodyMotifsItemLowMin = 0;
+export const storeSongAnalysisBodyMotifsItemLowMax = 1;
+
+export const storeSongAnalysisBodyMotifsItemMidMin = 0;
+export const storeSongAnalysisBodyMotifsItemMidMax = 1;
+
+export const storeSongAnalysisBodyMotifsItemHighMin = 0;
+export const storeSongAnalysisBodyMotifsItemHighMax = 1;
+
+export const storeSongAnalysisBodyMotifsItemCentroidMin = 0;
+export const storeSongAnalysisBodyMotifsItemCentroidMax = 1;
+
+export const storeSongAnalysisBodyMotifsItemFlatnessMin = 0;
+export const storeSongAnalysisBodyMotifsItemFlatnessMax = 1;
+
+export const storeSongAnalysisBodyMotifsItemTempoMin = 0;
+export const storeSongAnalysisBodyMotifsItemTempoMax = 300;
+
+export const storeSongAnalysisBodyMotifsMin = 8;
+export const storeSongAnalysisBodyMotifsMax = 8;
+
+
+
+export const StoreSongAnalysisBody = zod.object({
+  "version": zod.literal(1),
+  "duration": zod.number().min(1).max(storeSongAnalysisBodyDurationMax),
+  "analyzedSeconds": zod.number().min(storeSongAnalysisBodyAnalyzedSecondsMin).max(storeSongAnalysisBodyAnalyzedSecondsMax),
+  "signature": zod.object({
+  "rms": zod.number().min(storeSongAnalysisBodySignatureRmsMin).max(storeSongAnalysisBodySignatureRmsMax),
+  "onset": zod.number().min(storeSongAnalysisBodySignatureOnsetMin).max(storeSongAnalysisBodySignatureOnsetMax),
+  "low": zod.number().min(storeSongAnalysisBodySignatureLowMin).max(storeSongAnalysisBodySignatureLowMax),
+  "mid": zod.number().min(storeSongAnalysisBodySignatureMidMin).max(storeSongAnalysisBodySignatureMidMax),
+  "high": zod.number().min(storeSongAnalysisBodySignatureHighMin).max(storeSongAnalysisBodySignatureHighMax),
+  "centroid": zod.number().min(storeSongAnalysisBodySignatureCentroidMin).max(storeSongAnalysisBodySignatureCentroidMax),
+  "flatness": zod.number().min(storeSongAnalysisBodySignatureFlatnessMin).max(storeSongAnalysisBodySignatureFlatnessMax),
+  "pulse": zod.boolean(),
+  "tempo": zod.number().min(storeSongAnalysisBodySignatureTempoMin).max(storeSongAnalysisBodySignatureTempoMax)
+}),
+  "motifs": zod.array(zod.object({
+  "rms": zod.number().min(storeSongAnalysisBodyMotifsItemRmsMin).max(storeSongAnalysisBodyMotifsItemRmsMax),
+  "onset": zod.number().min(storeSongAnalysisBodyMotifsItemOnsetMin).max(storeSongAnalysisBodyMotifsItemOnsetMax),
+  "low": zod.number().min(storeSongAnalysisBodyMotifsItemLowMin).max(storeSongAnalysisBodyMotifsItemLowMax),
+  "mid": zod.number().min(storeSongAnalysisBodyMotifsItemMidMin).max(storeSongAnalysisBodyMotifsItemMidMax),
+  "high": zod.number().min(storeSongAnalysisBodyMotifsItemHighMin).max(storeSongAnalysisBodyMotifsItemHighMax),
+  "centroid": zod.number().min(storeSongAnalysisBodyMotifsItemCentroidMin).max(storeSongAnalysisBodyMotifsItemCentroidMax),
+  "flatness": zod.number().min(storeSongAnalysisBodyMotifsItemFlatnessMin).max(storeSongAnalysisBodyMotifsItemFlatnessMax),
+  "pulse": zod.boolean(),
+  "tempo": zod.number().min(storeSongAnalysisBodyMotifsItemTempoMin).max(storeSongAnalysisBodyMotifsItemTempoMax)
+})).min(storeSongAnalysisBodyMotifsMin).max(storeSongAnalysisBodyMotifsMax)
+})
+
+export const storeSongAnalysisResponseDurationMax = 720;
+
+export const storeSongAnalysisResponseAnalyzedSecondsMin = 0.001;
+export const storeSongAnalysisResponseAnalyzedSecondsMax = 720;
+
+export const storeSongAnalysisResponseSignatureRmsMin = 0;
+export const storeSongAnalysisResponseSignatureRmsMax = 1;
+
+export const storeSongAnalysisResponseSignatureOnsetMin = 0;
+export const storeSongAnalysisResponseSignatureOnsetMax = 1;
+
+export const storeSongAnalysisResponseSignatureLowMin = 0;
+export const storeSongAnalysisResponseSignatureLowMax = 1;
+
+export const storeSongAnalysisResponseSignatureMidMin = 0;
+export const storeSongAnalysisResponseSignatureMidMax = 1;
+
+export const storeSongAnalysisResponseSignatureHighMin = 0;
+export const storeSongAnalysisResponseSignatureHighMax = 1;
+
+export const storeSongAnalysisResponseSignatureCentroidMin = 0;
+export const storeSongAnalysisResponseSignatureCentroidMax = 1;
+
+export const storeSongAnalysisResponseSignatureFlatnessMin = 0;
+export const storeSongAnalysisResponseSignatureFlatnessMax = 1;
+
+export const storeSongAnalysisResponseSignatureTempoMin = 0;
+export const storeSongAnalysisResponseSignatureTempoMax = 300;
+
+export const storeSongAnalysisResponseMotifsItemRmsMin = 0;
+export const storeSongAnalysisResponseMotifsItemRmsMax = 1;
+
+export const storeSongAnalysisResponseMotifsItemOnsetMin = 0;
+export const storeSongAnalysisResponseMotifsItemOnsetMax = 1;
+
+export const storeSongAnalysisResponseMotifsItemLowMin = 0;
+export const storeSongAnalysisResponseMotifsItemLowMax = 1;
+
+export const storeSongAnalysisResponseMotifsItemMidMin = 0;
+export const storeSongAnalysisResponseMotifsItemMidMax = 1;
+
+export const storeSongAnalysisResponseMotifsItemHighMin = 0;
+export const storeSongAnalysisResponseMotifsItemHighMax = 1;
+
+export const storeSongAnalysisResponseMotifsItemCentroidMin = 0;
+export const storeSongAnalysisResponseMotifsItemCentroidMax = 1;
+
+export const storeSongAnalysisResponseMotifsItemFlatnessMin = 0;
+export const storeSongAnalysisResponseMotifsItemFlatnessMax = 1;
+
+export const storeSongAnalysisResponseMotifsItemTempoMin = 0;
+export const storeSongAnalysisResponseMotifsItemTempoMax = 300;
+
+export const storeSongAnalysisResponseMotifsMin = 8;
+export const storeSongAnalysisResponseMotifsMax = 8;
+
+
+
+export const StoreSongAnalysisResponse = zod.object({
+  "version": zod.literal(1),
+  "duration": zod.number().min(1).max(storeSongAnalysisResponseDurationMax),
+  "analyzedSeconds": zod.number().min(storeSongAnalysisResponseAnalyzedSecondsMin).max(storeSongAnalysisResponseAnalyzedSecondsMax),
+  "signature": zod.object({
+  "rms": zod.number().min(storeSongAnalysisResponseSignatureRmsMin).max(storeSongAnalysisResponseSignatureRmsMax),
+  "onset": zod.number().min(storeSongAnalysisResponseSignatureOnsetMin).max(storeSongAnalysisResponseSignatureOnsetMax),
+  "low": zod.number().min(storeSongAnalysisResponseSignatureLowMin).max(storeSongAnalysisResponseSignatureLowMax),
+  "mid": zod.number().min(storeSongAnalysisResponseSignatureMidMin).max(storeSongAnalysisResponseSignatureMidMax),
+  "high": zod.number().min(storeSongAnalysisResponseSignatureHighMin).max(storeSongAnalysisResponseSignatureHighMax),
+  "centroid": zod.number().min(storeSongAnalysisResponseSignatureCentroidMin).max(storeSongAnalysisResponseSignatureCentroidMax),
+  "flatness": zod.number().min(storeSongAnalysisResponseSignatureFlatnessMin).max(storeSongAnalysisResponseSignatureFlatnessMax),
+  "pulse": zod.boolean(),
+  "tempo": zod.number().min(storeSongAnalysisResponseSignatureTempoMin).max(storeSongAnalysisResponseSignatureTempoMax)
+}),
+  "motifs": zod.array(zod.object({
+  "rms": zod.number().min(storeSongAnalysisResponseMotifsItemRmsMin).max(storeSongAnalysisResponseMotifsItemRmsMax),
+  "onset": zod.number().min(storeSongAnalysisResponseMotifsItemOnsetMin).max(storeSongAnalysisResponseMotifsItemOnsetMax),
+  "low": zod.number().min(storeSongAnalysisResponseMotifsItemLowMin).max(storeSongAnalysisResponseMotifsItemLowMax),
+  "mid": zod.number().min(storeSongAnalysisResponseMotifsItemMidMin).max(storeSongAnalysisResponseMotifsItemMidMax),
+  "high": zod.number().min(storeSongAnalysisResponseMotifsItemHighMin).max(storeSongAnalysisResponseMotifsItemHighMax),
+  "centroid": zod.number().min(storeSongAnalysisResponseMotifsItemCentroidMin).max(storeSongAnalysisResponseMotifsItemCentroidMax),
+  "flatness": zod.number().min(storeSongAnalysisResponseMotifsItemFlatnessMin).max(storeSongAnalysisResponseMotifsItemFlatnessMax),
+  "pulse": zod.boolean(),
+  "tempo": zod.number().min(storeSongAnalysisResponseMotifsItemTempoMin).max(storeSongAnalysisResponseMotifsItemTempoMax)
+})).min(storeSongAnalysisResponseMotifsMin).max(storeSongAnalysisResponseMotifsMax)
+})
+
+
 export const getDriveAudioPathIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,200}$');
 
 

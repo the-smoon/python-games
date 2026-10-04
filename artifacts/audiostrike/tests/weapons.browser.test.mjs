@@ -3,6 +3,7 @@ import { selectMockPlaylist } from './drivePlaylistFixture.mjs';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
+import { WEAPON_BALANCE } from '../src/weaponRules.ts';
 
 const url = process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/';
 function silentWav() {
@@ -40,15 +41,20 @@ test('real pickups drive ranked weapons, shield, companions, freeze, piercing la
     assert.equal((await snap()).weapon.rank, 1);
     for (let i = 0; i < 5; i++) await pickup('TWIN');
     assert.equal((await snap()).weapon.rank, 5);
-    assert.deepEqual((await snap()).weapon.companions, [20, 20]);
+    assert.deepEqual((await snap()).weapon.companions, [WEAPON_BALANCE.companionHP, WEAPON_BALANCE.companionHP]);
     assert.match(await page.getByTestId('hud-weapon').innerText(), /Wingmen\s*2\/2/);
     await run(() => {
       const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
       api.enemyShot(p.x - 33, p.y + 8, 25);
     }); await tick();
-    assert.equal((await snap()).weapon.companions[0], 0, 'enemy shot destroys wingman');
+    assert.equal((await snap()).weapon.companions[0], WEAPON_BALANCE.companionHP - 25, 'wingman survives a heavy hit');
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
+      api.enemyShot(p.x - 33, p.y + 8, 100);
+    }); await tick();
+    assert.equal((await snap()).weapon.companions[0], 0, 'wingmen remain destructible');
     await pickup('TWIN');
-    assert.deepEqual((await snap()).weapon.companions, [20, 20]);
+    assert.deepEqual((await snap()).weapon.companions, [WEAPON_BALANCE.companionHP, WEAPON_BALANCE.companionHP]);
     await run(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ health: 30, invincible: 0 }));
     await pickup('SPREAD');
     assert.equal((await snap()).playerHealth, 70, 'lost ranks become hull repair');

@@ -5,6 +5,7 @@
  * OpenAPI spec version: 0.2.0
  */
 
+export * from './audioFingerprint';
 export * from './driveTrack';
 export * from './healthStatus';
 export * from './ownerLoginInput';
@@ -12,3 +13,5 @@ export * from './ownerStatus';
 export * from './playlistSummary';
 export * from './savedPlaylist';
 export * from './savePlaylistInput';
+export * from './songAnalysisDocument';
+export * from './songAnalysisDocumentVersion';

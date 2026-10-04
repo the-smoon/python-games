@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Crosshair, Gamepad2, Headphones, Pause, Play, RotateCcw, Volume2, Zap } from 'lucide-react';
 import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, encounterSignature, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
-import { audioIntensity, blendAudioSignals, bossHealth, chooseAttack, chooseMotion, generateForm, spawnProfile, varyShapeIdentity, type FormProfile, type ShapeIdentity } from './encounterRules';
-import { advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, enemyDropChance, fireWeapon, freezeSplash, laserHitsTarget, newWeaponState, pickDrop, slowScale, tickFrozenBullet, WEAPON_BALANCE, type LaserBeam, type Pickup, type PickupType } from './weaponRules';
+import { audioIntensity, blendAudioSignals, bossHealth, chooseAttack, chooseMotion, generateForm, spawnProfile } from './encounterRules';
+import { advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, enemyDropChance, fireWeapon, freezeSplash, laserHitsTarget, newWeaponState, pickDrop, slowScale, tickFrozenBullet, WEAPON_BALANCE, type PickupType } from './weaponRules';
 import WeaponHUD from './WeaponHUD';
 import { drawFrozenHalo, drawWeaponEffects } from './weaponVisuals';
 import { analyzeMusic } from './musicAnalysis';
@@ -12,9 +12,14 @@ import { levelPair, shuffleTracks, validateLocalPlaylist, type LocalTrack } from
 import { separateBossPositions } from './gameRules';
 import { EncounterScheduler } from './encounterScheduler';
 import { FrameCombatSimulation } from './combatSimulation';
-import { ARENA_HEIGHT as H, ARENA_WIDTH as W, createCombatViewSnapshot, type ActiveBoss, type AudioReactiveTrack, type BossEntity, type BulletEntity, type CombatArsenal, type CombatWorld, type DebrisEntity, type EnemyBulletEntity, type EnemyEntity, type EnemyShape, type FeatureSet, type GameState, type Joystick, type LiveFeatures, type ParticleEntity, type ProjectileKind } from './gameRuntimeTypes';
+import { ARENA_HEIGHT as H, ARENA_WIDTH as W, createCombatViewSnapshot, type ActiveBoss, type CombatArsenal, type CombatWorld, type EnemyBulletEntity, type EnemyEntity, type FeatureSet, type GameState, type Joystick, type LiveFeatures, type ParticleEntity } from './gameRuntimeTypes';
 import { blankLiveFeatures, createReactiveTrack, readReactiveTrack, releaseBossAudio, resetReactiveTrack, SoundtrackLifecycle } from './soundtrackLifecycle';
-import { chooseBehavior, chooseEnemyShape, chooseProjectile, createEnemyProjectile, firePattern } from './combatSimulation';
+import { chooseBehavior, chooseProjectile, createEnemyProjectile, firePattern } from './combatSimulation';
+import { shapePath, drawEnemyBody, drawBossBody } from './enemyVisuals';
+import { pixelBurst, bossDeathBurst, advanceCombatEffects, drawCombatEffects } from './combatEffects';
+import { disruptEnemies, castBossAbility, advanceBlasts, drawBossAbilities } from './bossAbilities';
+import { createSongDesign, songSpawnIdentity } from './songDesign';
+import { prepareSong } from './songAnalysisCache';
 const PLAYER_MAX_HEALTH = 100;
 const PLAYER_MAX_SPEED = 6.875;
 const PLAYER_ACCELERATION = .42;
@@ -62,56 +67,6 @@ const fallbackFeatures = (duration: number): FeatureSet => ({
   duration, signature: blankLiveFeatures(), motifs: Array.from({ length: 8 }, () => blankLiveFeatures()),
   analyzedSeconds: 0, analyzed: false,
 });
-
-function shapePath(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, shape: EnemyShape) {
-  ctx.beginPath();
-  if (shape === 'DIAMOND') {
-    ctx.moveTo(x, y - radius); ctx.lineTo(x + radius, y); ctx.lineTo(x, y + radius); ctx.lineTo(x - radius, y);
-  } else if (shape === 'TRIANGLE') {
-    ctx.moveTo(x, y - radius); ctx.lineTo(x + radius * .92, y + radius * .72); ctx.lineTo(x - radius * .92, y + radius * .72);
-  } else if (shape === 'HEX') {
-    for (let side = 0; side < 6; side += 1) {
-      const angle = side / 6 * Math.PI * 2 - Math.PI / 2;
-      const pointX = x + Math.cos(angle) * radius;
-      const pointY = y + Math.sin(angle) * radius;
-      if (side === 0) ctx.moveTo(pointX, pointY); else ctx.lineTo(pointX, pointY);
-    }
-  } else {
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-  }
-  ctx.closePath();
-}
-
-function drawGeneratedForm(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, form: FormProfile, color: string, frame: number) {
-  const points = Math.max(24, form.sides * 4);
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(form.rotation + Math.sin(frame * .013) * .08);
-  ctx.fillStyle = color;
-  ctx.strokeStyle = '#d6fff9';
-  ctx.lineWidth = Math.max(1.5, radius * .045);
-  ctx.beginPath();
-  for (let point = 0; point <= points; point += 1) {
-    const angle = point / points * Math.PI * 2;
-    const faceted = Math.cos(angle * form.sides) * .065;
-    const lobed = Math.sin(angle * form.lobes) * .09;
-    const spike = form.spikes ? Math.pow(Math.max(0, Math.cos(angle * form.spikes)), 8) * .18 : 0;
-    const r = radius * (0.8 + faceted + lobed + spike);
-    if (point === 0) ctx.moveTo(Math.cos(angle) * r, Math.sin(angle) * r);
-    else ctx.lineTo(Math.cos(angle) * r, Math.sin(angle) * r);
-  }
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = '#0b1930';
-  ctx.beginPath();
-  ctx.arc(0, 0, radius * form.innerRadius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = Math.max(2, radius * .08);
-  ctx.stroke();
-  ctx.restore();
-}
 
 function drawEnemyDamage(ctx: CanvasRenderingContext2D, enemy: EnemyEntity) {
   if (enemy.health >= enemy.maxHealth || enemy.health <= 0) return;
@@ -179,19 +134,6 @@ function spawnImpactDust(list: ParticleEntity[], x: number, y: number, color: st
     list.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life, maxLife: life, color: i % 3 === 0 ? '#eafff9' : color });
   }
   if (list.length > 280) list.splice(0, list.length - 280);
-}
-
-function spawnDeathDebris(list: DebrisEntity[], x: number, y: number, radius: number, color: string) {
-  const count = Math.min(18, Math.max(8, Math.round(radius * .42)));
-  for (let i = 0; i < count; i += 1) {
-    const angle = i * Math.PI * 2 / count + random(-.2, .2);
-    const speed = random(2.5, 7);
-    const life = randomInt(16, 30);
-    list.push({ x: x + Math.cos(angle) * radius * .27, y: y + Math.sin(angle) * radius * .27,
-      vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life, maxLife: life,
-      color, size: random(2, Math.max(4, radius * .22)), angle: random(0, Math.PI * 2), spin: random(-.2, .2) });
-  }
-  if (list.length > 120) list.splice(0, list.length - 120);
 }
 
 function drawPlayer(ctx: CanvasRenderingContext2D, x: number, y: number, frame: number, visible: boolean, health: number) {
@@ -280,7 +222,7 @@ function Home() {
   const bossAudioRef = useRef<HTMLAudioElement | null>(null);
   const joystickRef = useRef<Joystick>(neutralJoystick());
   const starsRef = useRef<{ x: number; y: number; size: number; brightness: number; speed: number }[]>([]);
-  const gameRef = useRef<CombatWorld>({ state: 'UPLOAD', level: 1, stageFeatures: null, bossFeatures: null, audioContext: null, stageReactive: null, bossReactive: null, player: { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [], bullets: [], enemyBullets: [], particles: [], debris: [], boss: null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, bossArrivalAt: 0, introTimer: 0, countdown: 3, countdownTimer: 0, currentBehavior: '' });
+  const gameRef = useRef<CombatWorld>({ state: 'UPLOAD', level: 1, stageFeatures: null, bossFeatures: null, audioContext: null, stageReactive: null, bossReactive: null, player: { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [], bullets: [], enemyBullets: [], particles: [], debris: [], blasts: [], shockwaves: [], boss: null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, bossArrivalAt: 0, introTimer: 0, countdown: 3, countdownTimer: 0, currentBehavior: '' });
   const arsenalRef = useRef<CombatArsenal>({
     weapon: newWeaponState(), drops: [], beam: null,
     splashes: [] as { x: number; y: number; until: number }[],
@@ -354,7 +296,8 @@ function Home() {
       if (bossAudioRef.current.src !== pair.boss.url) bossAudioRef.current.src = pair.boss.url;
       stageAudioRef.current.currentTime = 0; bossAudioRef.current.currentTime = 0;
     }
-    game.stageFeatures = pair.stage.features; game.bossFeatures = pair.boss.features;
+    game.stageFeatures = { ...pair.stage.features, design: createSongDesign(pair.stage.features) };
+    game.bossFeatures = { ...pair.boss.features, design: createSongDesign(pair.boss.features) };
     resetReactiveTrack(game.stageReactive); resetReactiveTrack(game.bossReactive);
   }, []);
 
@@ -426,11 +369,12 @@ function Home() {
       for (let index = 0; index < ordered.length; index++) {
         const track = ordered[index];
         setAnalysisMessage(`Mapping track ${index + 1}/${ordered.length}: ${track.title}`);
-        const features = await inspectAudio(track.file, (value) => {
+        const prepared = await prepareSong(track.file, inspectAudio, (value) => {
           if (index % 2 === 0) setStageProgress(value); else setBossProgress(value);
           setAnalysisProgress(Math.round((index + value / 100) / ordered.length * 100));
         });
-        preparedRef.current.push({ ...track, features, url: URL.createObjectURL(track.file) });
+        if (prepared.warning) setMusicWarning(prepared.warning);
+        preparedRef.current.push({ ...track, features: prepared.features, url: URL.createObjectURL(track.file) });
       }
       if (preparedRef.current.some((track) => !track.features.analyzed)) {
         setMusicWarning('A track could not be pre-analyzed. Live audio will still guide combat where available.');
@@ -476,7 +420,7 @@ function Home() {
       bombUntil: 0, message: '', messageUntil: 0, dropMisses: 0 };
     setCombatHud({ weapon: newWeaponState(), now: 0, message: '', messageUntil: 0 });
     game.player = { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 };
-    game.enemies = []; game.bullets = []; game.enemyBullets = []; game.particles = []; game.debris = []; game.boss = null;
+    game.enemies = []; game.bullets = []; game.enemyBullets = []; game.particles = []; game.debris = []; game.blasts = []; game.shockwaves = []; game.boss = null;
       game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.spawnCooldown = 0; game.stageDone = false; game.bossArrivalAt = 0; game.introTimer = 0;
     resetReactiveTrack(game.stageReactive);
     resetReactiveTrack(game.bossReactive);
@@ -576,13 +520,15 @@ function Home() {
       const structure = features.signature;
       const reactiveSignature = game.bossReactive?.signature ?? live;
       const style = encounterSignature(structure);
-      const shape = varyShapeIdentity(style.shape as ShapeIdentity, game.level - 1);
+      const blueprint = features.design ?? createSongDesign(features);
+      const shape = blueprint.core;
       const formSignal = blendAudioSignals(structure, reactiveSignature, .32);
       const id = encountersRef.current.createBossId();
       const boss: ActiveBoss = {
         id, originLevel: game.level, features, audio: bossAudioRef.current, reactive: game.bossReactive,
         x: W / 2, y: -35, radius: 55, health: hp, maxHealth: hp, shape, designShape: shape,
-        projectile: chooseProjectile(live, 'BOSS') as ProjectileKind, pattern: chooseAttack(live, game.level),
+        projectile: blueprint.projectile, designProjectile: blueprint.projectile, color: blueprint.colors[0],
+        pattern: chooseAttack(live, game.level), secondaryAt: gameNow() / 1000 + 6,
         motion: chooseMotion(blendAudioSignals(structure, live, .4), game.level, shape, style.motion),
         designMotion: style.motion, motionChangedAt: gameNow() / 1000,
         form: generateForm(formSignal, game.level * 37),
@@ -607,7 +553,8 @@ function Home() {
       const motifs = boss.features.motifs;
       const motif = motifs.length ? motifs[Math.abs(serial) % motifs.length] : boss.features.signature;
       const identity = encounterSignature(motif);
-      const shape = chooseEnemyShape(live, serial, identity.shape as ShapeIdentity);
+      const spawnIdentity = songSpawnIdentity(boss.features, motif, serial);
+      const shape = spawnIdentity.shape;
       const design = blendAudioSignals(motif, boss.reactive?.signature ?? live, .4);
       const radius = 22 + live.low * 8;
       const x = clamp(boss.x + (serial % 2 ? 1 : -1) * (boss.radius + 16), radius, W - radius);
@@ -617,7 +564,8 @@ function Home() {
         behavior: 'SHOOTER', fireRate: clamp(85 - audioIntensity(live) * 40 - level * 2, 24, 90),
         fireTimer: 38, frame: 0, zigDir: serial % 2 ? 1 : -1, formX: x, formY: boss.y,
         diving: false, dvx: 0, dvy: 0, shape,
-        projectile: chooseProjectile(live, 'BOSS'), form: generateForm(design, serial, 1.1),
+        projectile: spawnIdentity.projectile, designProjectile: spawnIdentity.projectile, color: spawnIdentity.color,
+        form: generateForm(design, serial, 1.1),
         motion: chooseMotion(blendAudioSignals(motif, live, .4), serial, shape, identity.motion),
         designMotion: identity.motion, motionChangedAt: gameNow() / 1000, pattern: chooseAttack(live, serial),
         subBoss: true, ownerId: boss.id, originLevel: level, exiting: false, alive: true,
@@ -630,6 +578,7 @@ function Home() {
       }
       game.enemies = game.enemies.filter((enemy) => enemy.ownerId !== boss.id);
       game.enemyBullets = game.enemyBullets.filter((bullet) => bullet.ownerId !== boss.id);
+      game.blasts = game.blasts.filter((blast) => blast.ownerId !== boss.id);
     };
     const addDrop = (type: PickupType, x: number, y: number) => {
       const arsenal = arsenalRef.current;
@@ -642,7 +591,7 @@ function Home() {
       const game = gameRef.current;
       enemy.alive = false;
       game.score += 100 + enemy.maxHealth * 20;
-      spawnDeathDebris(game.debris, enemy.x, enemy.y, enemy.radius, COLORS[enemy.behavior]);
+      pixelBurst(game.particles, enemy.x, enemy.y, enemy.color ?? COLORS[enemy.behavior], Math.round(22 + enemy.radius * .6));
       if (allowDrop && !enemy.exiting) {
         const arsenal = arsenalRef.current;
         arsenal.dropMisses += 1;
@@ -658,8 +607,11 @@ function Home() {
       if (boss.phase === 'DYING' || (boss.phase === 'INTRO' && !allowIntroDamage)) return;
       if (damageBoss(boss, amount)) game.score += 40;
       if (boss.health === 0) {
-      if (Math.random() < WEAPON_BALANCE.bossDropChance) addDrop(pickDrop(Math.random() * .54), boss.x, boss.y);
+        if (Math.random() < WEAPON_BALANCE.bossRepairChance) addDrop('REPAIR', boss.x, boss.y);
+        else if (Math.random() < WEAPON_BALANCE.bossDropChance) addDrop(pickDrop(Math.random() * .66), boss.x, boss.y);
         clearHostilesOnBossDeath(boss);
+        bossDeathBurst(game, boss, gameNow() / 1000);
+        disruptEnemies(game, gameNow() / 1000);
         if (encountersRef.current.encounter?.id === boss.id && !encountersRef.current.encounter.advanced) {
           encountersRef.current.protectUntil(gameNow() + 2500);
           finishEncounter(boss.id);
@@ -738,10 +690,7 @@ function Home() {
       const game = gameRef.current;
       game.frame += 1;
        for (const star of stars) { star.y += star.speed * delta * .35; if (star.y > H) { star.y = 0; star.x = random(0, W); } }
-      for (const particle of game.particles) { particle.x += particle.vx * delta * .06; particle.y += particle.vy * delta * .06; particle.vy += .07 * delta; particle.life -= delta; }
-      game.particles = game.particles.filter((particle) => particle.life > 0);
-      for (const chunk of game.debris) { chunk.x += chunk.vx * delta; chunk.y += chunk.vy * delta; chunk.vy += .045 * delta; chunk.angle += chunk.spin * delta; chunk.life -= delta; }
-      game.debris = game.debris.filter((chunk) => chunk.life > 0);
+      advanceCombatEffects(game, delta);
       if (game.state === 'COUNTDOWN') {
         game.countdownTimer -= delta;
         if (game.countdownTimer <= 0) {
@@ -758,6 +707,7 @@ function Home() {
       if (game.state !== 'PLAYING' && game.state !== 'BOSS' && game.state !== 'BOSS_INTRO') return;
       const arsenal = arsenalRef.current;
       const now = gameNow() / 1000;
+      game.shockwaves = game.shockwaves.filter(effect => effect.until > now);
       arsenal.splashes = arsenal.splashes.filter((effect) => effect.until > now);
       if (arsenal.beam && arsenal.beam.until <= now) arsenal.beam = null;
       let stageSecondsLeft = 0;
@@ -780,13 +730,26 @@ function Home() {
       }
       combatSimulationRef.current.movePlayer(player, {
         x: joystick.dx, y: joystick.dy, active: isSteering,
-      }, delta, game.state === 'BOSS');
+      }, delta, game.state === 'BOSS', now);
       player.invincible = Math.max(0, player.invincible - delta);
       finishEncounter();
       const volley = fireWeapon(arsenal.weapon, player, now);
       game.bullets.push(...volley.shots.slice(0, Math.max(0, WEAPON_BALANCE.maxBullets - game.bullets.length)));
       if (volley.beam) arsenal.beam = volley.beam;
       const live = readReactiveTrack(selectSoundtrack());
+      for (const blast of advanceBlasts(game, now)) {
+        pixelBurst(game.particles, blast.x, blast.y, blast.kind === 'BLAST' ? '#ffb06b' : '#d9a6ff', 45, 1.2);
+        if (Math.hypot(player.x - blast.x, player.y - blast.y) <= blast.radius + PLAYER_W / 2 &&
+          !damageProtected() && player.invincible <= 0 && arsenal.weapon.shieldUntil <= now) {
+          if (blast.kind === 'DEBUFF') {
+            player.debuffUntil = now + 5;
+            arsenal.message = 'Disrupted · movement and fire slowed for 5s'; arsenal.messageUntil = now + 5;
+          } else {
+            player.health = Math.max(0, player.health - 18); player.invincible = 90;
+            if (player.health <= 0) gameOver();
+          }
+        }
+      }
       if (game.state === 'PLAYING') {
         const songTime = getGameTime();
         const stage = getStageProgress(songTime);
@@ -815,10 +778,9 @@ function Home() {
             const motif = motifs.length ? motifs[Math.abs(serial) % motifs.length] : game.stageFeatures?.signature ?? live;
             const identity = encounterSignature(motif);
             const design = blendAudioSignals(motif, game.stageReactive?.signature ?? live, .4);
-            const shape = enemyIndex % 3 === 0
-              ? chooseEnemyShape(live, enemyIndex, identity.shape as ShapeIdentity)
-              : chooseEnemyShape(design, serial);
-            const projectile = chooseProjectile(live, behavior);
+            const spawnIdentity = songSpawnIdentity(game.stageFeatures ?? fallbackFeatures(30), motif, serial);
+            const shape = spawnIdentity.shape;
+            const projectile = spawnIdentity.projectile;
             const motion = chooseMotion(blendAudioSignals(motif, live, .4), serial, shape, identity.motion);
             const pattern = chooseAttack(live, serial);
             game.enemies.push({
@@ -827,6 +789,7 @@ function Home() {
               behavior, fireRate: clamp((112 - live.mid * 42) / pressure.fireScale, 28, 140),
               fireTimer: randomInt(20, 80), frame: 0, zigDir: Math.random() > .5 ? 1 : -1,
               formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, shape, projectile,
+              designProjectile: projectile, color: spawnIdentity.color,
               form: generateForm(design, serial, .8), motion, designMotion: identity.motion,
               motionChangedAt: gameNow() / 1000, pattern, subBoss: false, exiting: false, alive: true,
             });
@@ -843,7 +806,9 @@ function Home() {
           if (boss.y >= 117) { boss.phase = bossPhase(boss.health, boss.maxHealth); boss.phaseFrame = 0; boss.subBossTimer = 180; spawnSubBoss(live, boss); }
         } else if (boss.phase === 'DYING') {
           const deathComplete = advanceBossDeath(boss, delta);
-          if (game.frame % 4 === 0) spawnParticles(game.particles, boss.x + random(-boss.radius, boss.radius), boss.y + random(-boss.radius, boss.radius), ['#ff4444', '#ff8800', '#ffff00', '#ffffff'][randomInt(0, 3)], 12, 2, 9);
+          if (boss.dyingTimer < 95 && Math.floor((boss.dyingTimer - delta) / 15) !== Math.floor(boss.dyingTimer / 15)) {
+            pixelBurst(game.particles, boss.x + random(-boss.radius, boss.radius), boss.y + random(-boss.radius, boss.radius), boss.color ?? '#ffdca0', 24, 1.3);
+          }
           if (deathComplete) {
             game.score += 1000 + boss.originLevel * 500;
             completedBosses.add(boss);
@@ -860,8 +825,6 @@ function Home() {
             if (motifs.length) {
               const motif = motifs[Math.abs(boss.revision) % motifs.length];
               const identity = encounterSignature(motif);
-              boss.designShape = identity.shape as ShapeIdentity;
-              boss.shape = varyShapeIdentity(boss.designShape, level + boss.revision - 1);
               boss.designMotion = identity.motion;
             }
             spawnSubBoss(live, boss);
@@ -876,8 +839,6 @@ function Home() {
             const serial = boss.revision + level * 37;
             const motifs = boss.features.motifs;
             const motif = motifs.length ? motifs[Math.abs(serial) % motifs.length] : boss.features.signature;
-            const design = blendAudioSignals(motif, boss.reactive?.signature ?? live, .4);
-            boss.form = generateForm(design, serial);
             boss.motion = chooseMotion(live, serial, boss.shape, boss.designMotion);
             boss.pattern = chooseAttack(live, serial);
           }
@@ -886,7 +847,7 @@ function Home() {
               boss.shape, boss.designMotion);
             boss.motionChangedAt = now;
           }
-          boss.projectile = chooseProjectile(live, 'BOSS');
+          boss.projectile = boss.designProjectile ?? chooseProjectile(live, 'BOSS');
           game.currentBehavior = `BOSS ${boss.pattern}`;
           boss.subBossTimer -= bossDelta;
           if (boss.subBossTimer <= 0 && (live.pulse || audioIntensity(live) > .55 || boss.subBossTimer <= -150)) {
@@ -894,6 +855,11 @@ function Home() {
             boss.subBossTimer = clamp(680 - audioIntensity(live) * 350 - level * 15, 240, 680);
           }
           combatSimulationRef.current.moveBoss(boss, player, live, bossDelta);
+          const ability = castBossAbility(game, boss, live, now);
+          if (ability) {
+            arsenal.message = ability === 'BUFF' ? 'Boss overdrive · enemies empowered for 5s' : ability === 'DEBUFF' ? 'Disruption field charging · leave the violet circle' : 'Blast zones charging · leave the orange circles';
+            arsenal.messageUntil = now + 3;
+          }
           boss.fireTimer -= bossDelta * (1 + audioIntensity(live) * .45);
           if (boss.fireTimer <= 0) {
             firePattern(game.enemyBullets, boss.x, boss.y + boss.radius * .3, player, boss.pattern, boss.projectile, 7.4 + Math.min(2, level * .18), boss.pattern === 'TRACK' ? 8 : 4, game.frame, boss.id);
@@ -907,8 +873,10 @@ function Home() {
       for (const enemy of game.enemies) {
         if (!canAttack()) break;
         if (!enemy.alive) continue;
-        enemy.pattern = chooseAttack(live, Math.floor(enemy.frame));
-        enemy.projectile = chooseProjectile(live, enemy.behavior);
+        const confused = (enemy.confusedUntil ?? 0) > now;
+        enemy.behavior = chooseBehavior(live);
+        enemy.pattern = confused ? (['TRACK', 'WAVE', 'SPIRAL'] as const)[Math.abs(Math.floor(enemy.frame / 18 + enemy.formX)) % 3] : chooseAttack(live, Math.floor(enemy.frame));
+        enemy.projectile = enemy.designProjectile ?? chooseProjectile(live, enemy.behavior);
         if (live.pulse && now - enemy.motionChangedAt > .22 && !enemy.exiting) {
           const nextMotion = chooseMotion(live, Math.floor(enemy.frame + game.spawnIndex),
             enemy.shape, enemy.designMotion);
@@ -922,8 +890,9 @@ function Home() {
         if (!enemy.exiting && enemy.fireRate > 0) {
           enemy.fireTimer -= enemyDelta * (1 + audioIntensity(live) * .7);
           if (enemy.fireTimer <= 0) {
-            firePattern(game.enemyBullets, enemy.x, enemy.y, player, enemy.pattern, enemy.projectile, 7 + Math.min(2, (enemy.originLevel ?? game.level) * .12), enemy.subBoss ? 5 : 3, Math.round(enemy.frame), enemy.ownerId);
-            enemy.fireTimer = enemy.fireRate;
+            const aim = confused ? { x: enemy.x + Math.sin(enemy.frame + enemy.formX) * 150, y: enemy.y + Math.cos(enemy.frame + enemy.formX) * 150 } : player;
+            firePattern(game.enemyBullets, enemy.x, enemy.y, aim, enemy.pattern, enemy.projectile, 7 + Math.min(2, (enemy.originLevel ?? game.level) * .12), enemy.subBoss ? 5 : 3, Math.round(enemy.frame), enemy.ownerId);
+            enemy.fireTimer = enemy.fireRate * clamp(attackInterval(live, enemy.originLevel ?? game.level) / 100, .45, 1.5);
           }
         }
         if (enemy.y > H + 70) enemy.alive = false;
@@ -939,7 +908,7 @@ function Home() {
         if (enemy.alive && !enemy.exiting && enemyOnScreen &&
           combatSimulationRef.current.enemyHitsPlayer(enemy, player)) {
           enemy.alive = false;
-          spawnDeathDebris(game.debris, enemy.x, enemy.y, enemy.radius, COLORS[enemy.behavior]);
+          pixelBurst(game.particles, enemy.x, enemy.y, enemy.color ?? COLORS[enemy.behavior], 30);
           if (!damageProtected() && player.invincible <= 0 && arsenal.weapon.shieldUntil <= now) {
             player.health = Math.max(0, player.health - (enemy.subBoss ? 22 : enemy.behavior === 'TANK' ? 25 : 14));
             player.invincible = 90;
@@ -1048,57 +1017,23 @@ function Home() {
       ctx.strokeStyle = 'rgba(0,229,255,.06)';
       ctx.lineWidth = 1;
       for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-      for (const particle of game.particles) { ctx.globalAlpha = Math.max(0, particle.life / particle.maxLife); ctx.fillStyle = particle.color; ctx.fillRect(particle.x - 2, particle.y - 2, 4, 4); }
-      ctx.globalAlpha = 1;
-      for (const chunk of game.debris) {
-        ctx.save();
-        ctx.globalAlpha = Math.min(1, chunk.life / Math.min(12, chunk.maxLife));
-        ctx.translate(chunk.x, chunk.y);
-        ctx.rotate(chunk.angle);
-        ctx.fillStyle = chunk.color;
-        ctx.beginPath();
-        ctx.moveTo(-chunk.size, -chunk.size * .5);
-        ctx.lineTo(chunk.size * .75, -chunk.size);
-        ctx.lineTo(chunk.size, chunk.size * .55);
-        ctx.lineTo(-chunk.size * .45, chunk.size);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      }
+      drawBossAbilities(ctx, game, gameNow() / 1000);
+      drawCombatEffects(ctx, game, gameNow() / 1000);
        for (const bullet of game.enemyBullets) {
          drawEnemyProjectile(ctx, bullet);
          if ((bullet.frozenUntil ?? 0) > gameNow() / 1000) drawFrozenHalo(ctx, bullet.x, bullet.y, bullet.radius);
        }
        for (const enemy of game.enemies) {
-         const color = COLORS[enemy.behavior];
          ctx.globalAlpha = .85;
-          drawGeneratedForm(ctx, enemy.x, enemy.y, enemy.radius, enemy.form, color, enemy.frame);
+           drawEnemyBody(ctx, enemy, gameNow() / 1000);
           if (enemy.subBoss) { ctx.strokeStyle = '#ffb347'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(enemy.x, enemy.y, enemy.radius + 7, 0, Math.PI * 2); ctx.stroke(); }
          ctx.globalAlpha = 1;
           drawEnemyDamage(ctx, enemy);
           if (slowScale(enemy, gameNow() / 1000) < 1) drawFrozenHalo(ctx, enemy.x, enemy.y, enemy.radius);
        }
        for (const boss of encountersRef.current.bosses) {
-         const color = boss.phase === 'PHASE3' ? '#ff2244' : boss.phase === 'PHASE2' ? '#ff8800' : '#4488ff';
-         const gradient = ctx.createRadialGradient(boss.x, boss.y, 0, boss.x, boss.y, boss.radius * 2.2);
-         gradient.addColorStop(0, `${color}55`); gradient.addColorStop(1, 'transparent');
-         ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius * 2.2, 0, Math.PI * 2); ctx.fill();
          ctx.globalAlpha = .9;
-          for (let index = 0; index < boss.parts; index += 1) {
-            const side = index % 2 ? 1 : -1;
-            const tier = Math.floor(index / 2);
-            const nodeX = boss.x + side * (boss.radius + 20 + tier * 14);
-            const nodeY = boss.y + 12 + tier * 24;
-            ctx.strokeStyle = color; ctx.lineWidth = 7;
-            ctx.beginPath(); ctx.moveTo(boss.x + side * 24, boss.y + 16); ctx.lineTo(nodeX, nodeY); ctx.stroke();
-            drawGeneratedForm(ctx, nodeX, nodeY, 18 - tier * 2, boss.form, color, boss.frame);
-          }
-          drawGeneratedForm(ctx, boss.x, boss.y, boss.radius, boss.form, color, boss.frame);
-          ctx.fillStyle = '#ffffff'; ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center';
-          ctx.fillText(`L${boss.originLevel}`, boss.x, boss.y + 4);
-          ctx.textAlign = 'start';
-         ctx.globalAlpha = 1;
-         for (let ring = 1; ring <= 2; ring += 1) { ctx.strokeStyle = color; ctx.globalAlpha = .32 / ring; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.radius + ring * 14, 0, Math.PI * 2); ctx.stroke(); }
+          drawBossBody(ctx, boss);
          ctx.globalAlpha = 1;
          if (slowScale(boss, gameNow() / 1000) < 1) drawFrozenHalo(ctx, boss.x, boss.y, boss.radius);
        }

@@ -2,6 +2,7 @@ import type { AudioFingerprint } from './musicAnalysis';
 import type { AttackPattern, FormProfile, MotionPattern, ShapeIdentity } from './encounterRules';
 import { BOSS_ENCOUNTER_SECONDS, encounterProgress, type BossEncounter } from './gameRules';
 import type { LaserBeam, Pickup, PlayerShot } from './weaponRules';
+import type { SongDesign } from './songDesign';
 
 export const ARENA_WIDTH = 420;
 export const ARENA_HEIGHT = 900;
@@ -14,6 +15,8 @@ export type FeatureSet = {
   motifs: AudioFingerprint[];
   analyzedSeconds: number;
   analyzed: boolean;
+  songKey?: string;
+  design?: SongDesign;
 };
 export type LiveFeatures = AudioFingerprint;
 export type EnemyShape = ShapeIdentity;
@@ -43,6 +46,7 @@ export type PlayerEntity = {
   invincible: number;
   fireTimer: number;
   frame: number;
+  debuffUntil?: number;
 };
 
 export type EnemyEntity = {
@@ -52,16 +56,19 @@ export type EnemyEntity = {
   projectile: ProjectileKind; exiting: boolean; alive: boolean; form: FormProfile;
   motion: MotionPattern; designMotion: MotionPattern | 'HUNT'; motionChangedAt: number;
   pattern: AttackPattern; subBoss: boolean; ownerId?: number; originLevel?: number; frozenUntil?: number;
+  color?: string; designProjectile?: ProjectileKind;
+  stunnedUntil?: number; confusedUntil?: number; buffUntil?: number;
 };
 export type BulletEntity = PlayerShot;
 export type EnemyBulletEntity = {
   x: number; y: number; vx: number; vy: number; damage: number; alive: boolean;
   kind?: ProjectileKind; radius: number; spin?: number; frozenUntil?: number; ownerId?: number;
 };
-export type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string };
+export type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; pixel?: boolean; size?: number };
 export type DebrisEntity = {
   x: number; y: number; vx: number; vy: number; life: number; maxLife: number;
   color: string; size: number; angle: number; spin: number;
+  generation?: number; split?: boolean; sparkTimer?: number;
 };
 export type BossEntity = {
   x: number; y: number; radius: number; health: number; maxHealth: number;
@@ -69,6 +76,7 @@ export type BossEntity = {
   motion: MotionPattern; designMotion: MotionPattern | 'HUNT'; motionChangedAt: number;
   form: FormProfile; parts: number; phase: BossPhase; frame: number; phaseFrame: number;
   vx: number; fireTimer: number; dyingTimer: number; subBossTimer: number; revision: number; frozenUntil?: number;
+  color?: string; designProjectile?: ProjectileKind; secondaryAt?: number; secondaryIndex?: number;
 };
 export type ActiveBoss = BossEntity & {
   id: number;
@@ -78,6 +86,11 @@ export type ActiveBoss = BossEntity & {
   reactive: AudioReactiveTrack | null;
 };
 export type Joystick = { pointerId: number | null; x: number; y: number; dx: number; dy: number };
+export type DelayedBlast = {
+  x: number; y: number; radius: number; createdAt: number; explodeAt: number; ownerId: number;
+  kind: 'BLAST' | 'DEBUFF'; detonated: boolean;
+};
+export type Shockwave = { x: number; y: number; color: string; startedAt: number; until: number };
 export type CombatArsenal = {
   weapon: ReturnType<typeof import('./weaponRules').newWeaponState>;
   drops: Pickup[];
@@ -102,6 +115,8 @@ export type CombatWorld = {
   enemyBullets: EnemyBulletEntity[];
   particles: ParticleEntity[];
   debris: DebrisEntity[];
+  blasts: DelayedBlast[];
+  shockwaves: Shockwave[];
   boss: BossEntity | null;
   score: number;
   frame: number;

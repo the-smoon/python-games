@@ -27,6 +27,37 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/DriveTrack"
+  /song-analysis/{hash}:
+    get:
+      operationId: getSongAnalysis
+      parameters:
+        - $ref: "#/components/parameters/AudioHash"
+      responses:
+        "200":
+          description: Cached numerical song analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SongAnalysisDocument"
+        "404":
+          description: Song has not been analyzed with this analyzer version
+    put:
+      operationId: storeSongAnalysis
+      parameters:
+        - $ref: "#/components/parameters/AudioHash"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SongAnalysisDocument"
+      responses:
+        "200":
+          description: Stored immutable analysis, or the existing document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SongAnalysisDocument"
   /playlists/audio/{id}:
     get:
       operationId: getDriveAudio
@@ -135,6 +166,13 @@ paths:
                 $ref: "#/components/schemas/DriveTrack"
 components:
   parameters:
+    AudioHash:
+      name: hash
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-f0-9]{64}$"
     FileId:
       name: id
       in: path
@@ -143,6 +181,36 @@ components:
         type: string
         pattern: "^[A-Za-z0-9_-]{1,200}$"
   schemas:
+    AudioFingerprint:
+      type: object
+      additionalProperties: false
+      required: [rms, onset, low, mid, high, centroid, flatness, pulse, tempo]
+      properties:
+        rms: { type: number, minimum: 0, maximum: 1 }
+        onset: { type: number, minimum: 0, maximum: 1 }
+        low: { type: number, minimum: 0, maximum: 1 }
+        mid: { type: number, minimum: 0, maximum: 1 }
+        high: { type: number, minimum: 0, maximum: 1 }
+        centroid: { type: number, minimum: 0, maximum: 1 }
+        flatness: { type: number, minimum: 0, maximum: 1 }
+        pulse: { type: boolean }
+        tempo: { type: number, minimum: 0, maximum: 300 }
+    SongAnalysisDocument:
+      type: object
+      additionalProperties: false
+      required: [version, duration, signature, motifs, analyzedSeconds]
+      properties:
+        version: { type: integer, enum: [1] }
+        duration: { type: number, minimum: 1, maximum: 720 }
+        analyzedSeconds: { type: number, minimum: 0.001, maximum: 720 }
+        signature:
+          $ref: "#/components/schemas/AudioFingerprint"
+        motifs:
+          type: array
+          minItems: 8
+          maxItems: 8
+          items:
+            $ref: "#/components/schemas/AudioFingerprint"
     HealthStatus:
       type: object
       required: [status]

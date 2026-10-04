@@ -15,6 +15,7 @@ export type AudioStrikeTestApi = {
   spawnSubBoss: () => void;
   setEncounterElapsed: (seconds: number) => void;
   setBossHealth: (id: number, health: number) => void;
+  castSecondary: (id: number, kind: 'BLAST' | 'DEBUFF' | 'BUFF') => void;
   setAudioSpectrum: (id: number, band: SpectrumBand) => void;
   drop: (type: PickupType, x?: number, y?: number) => void;
   setPlayer: (values: Partial<PlayerEntity>) => void;
@@ -81,6 +82,7 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
           id: boss.id, level: boss.originLevel, health: boss.health, maxHealth: boss.maxHealth,
           x: boss.x, y: boss.y, phase: boss.phase, frame: boss.frame, dyingTimer: boss.dyingTimer,
           src: boss.audio?.src, paused: boss.audio?.paused, fireTimer: boss.fireTimer,
+           shape: boss.shape, color: boss.color, projectile: boss.projectile, secondaryAt: boss.secondaryAt,
         })),
         encounter: encounters.encounter ? {
           ...encounters.encounter, ...encounterProgress(encounters.encounter, now),
@@ -92,10 +94,12 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         stageAnalysis: game.stageFeatures ? {
           ...game.stageFeatures.signature, analyzed: game.stageFeatures.analyzed,
           analyzedSeconds: game.stageFeatures.analyzedSeconds, motifCount: game.stageFeatures.motifs.length,
+          songKey: game.stageFeatures.songKey, design: game.stageFeatures.design,
         } : null,
         bossAnalysis: game.bossFeatures ? {
           ...game.bossFeatures.signature, analyzed: game.bossFeatures.analyzed,
           analyzedSeconds: game.bossFeatures.analyzedSeconds, motifCount: game.bossFeatures.motifs.length,
+          songKey: game.bossFeatures.songKey, design: game.bossFeatures.design,
         } : null,
         stageTime: (now - game.songStart) / 1000,
         stageAudioTime: runtime.getStageAudio()?.currentTime,
@@ -115,12 +119,18 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         drops: arsenal.drops.map((drop) => ({ ...drop })),
         shots: game.bullets.map((shot) => ({ ...shot })),
         beam: arsenal.beam,
+        pixelCount: game.particles.filter(p => p.pixel).length,
+        debris: game.debris.map(d => ({ generation: d.generation, size: d.size })),
+        shockwaves: game.shockwaves.map(w => ({ ...w })),
+        blasts: game.blasts.map(b => ({ ...b })),
         enemies: game.enemies.map((enemy) => ({
           x: enemy.x, y: enemy.y, health: enemy.health, shape: enemy.shape,
           motion: enemy.motion, pattern: enemy.pattern, projectile: enemy.projectile, subBoss: enemy.subBoss,
           ownerId: enemy.ownerId, frame: enemy.frame, speed: enemy.speed,
           frozenUntil: enemy.frozenUntil, fireTimer: enemy.fireTimer, alive: enemy.alive,
           exiting: enemy.exiting, fireRate: enemy.fireRate,
+          stunnedUntil: enemy.stunnedUntil, confusedUntil: enemy.confusedUntil, buffUntil: enemy.buffUntil,
+          color: enemy.color,
         })),
         enemyShots: game.enemyBullets.map((shot) => ({ ...shot })),
       };
@@ -134,6 +144,10 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         boss.health = health;
         boss.maxHealth = Math.max(boss.maxHealth, health);
       }
+    },
+    castSecondary: (id, kind) => {
+      const boss = runtime.getEncounters().findBoss(id);
+      if (boss) { boss.secondaryAt = runtime.gameNow() / 1000 - 1; boss.secondaryIndex = ['BLAST', 'DEBUFF', 'BUFF'].indexOf(kind); }
     },
     setAudioSpectrum: (id, band) => {
       const track = runtime.getEncounters().findBoss(id)?.reactive;
@@ -171,7 +185,7 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         x, y, radius: 18, health, maxHealth: health, speed,
         behavior: 'PATROL', fireRate, fireTimer: 0, frame: 0, zigDir: 1,
         formX: x, formY: y, diving: false, dvx: 0, dvy: 0, shape: 'CIRCLE',
-        projectile: 'ORB', exiting: false, alive: true, subBoss,
+        projectile: 'ORB', designProjectile: 'ORB', exiting: false, alive: true, subBoss,
         form: generateForm(blankLiveFeatures(), 1), motion: 'SWEEP', designMotion: 'SWEEP',
         motionChangedAt: speed ? Infinity : runtime.gameNow() / 1000, pattern: 'TRACK',
       });

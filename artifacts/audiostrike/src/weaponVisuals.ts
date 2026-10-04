@@ -72,7 +72,7 @@ export function drawWeaponEffects(
     for (const s of shots) {
       if (!s.alive) continue;
       const c = COL[s.weapon];
-      const rk = Math.min(5, 1 + Math.round((s.damage - (s.weapon === 'TWIN' ? 1 : 2.5)) / (s.weapon === 'TWIN' ? .25 : .5)));
+      const rk = Math.min(5, 1 + Math.round((s.damage - (s.weapon === 'TWIN' ? 1 : 2.5)) / (s.weapon === 'TWIN' ? .3 : .875)));
       ctx.globalAlpha = 1;
       if (s.weapon === 'SPREAD') {
         const col = s.freeze ? '#aef4ff' : c;

@@ -10,7 +10,7 @@ test('same pickups rank up and cap; switching replaces rank and repairs only los
   const w = newWeaponState();
   for (let i = 0; i < 8; i++) collectPickup(w, 'TWIN', 100, i);
   assert.equal(w.rank, 5);
-  assert.deepEqual(w.companions, [20, 20]);
+  assert.deepEqual(w.companions, [WEAPON_BALANCE.companionHP, WEAPON_BALANCE.companionHP]);
   const result = collectPickup(w, 'SPREAD', 30, 10);
   assert.equal(w.type, 'SPREAD'); assert.equal(w.rank, 1); assert.equal(result.health, 70);
   assert.deepEqual(w.companions, [0, 0]);
@@ -21,7 +21,7 @@ test('same pickups rank up and cap; switching replaces rank and repairs only los
 test('max-rank twin pickup restores destroyed companions, not healthy or partially damaged ones', () => {
   const w = newWeaponState(); w.rank = 5; w.companions = [0, 7];
   collectPickup(w, 'TWIN', 100, 0);
-  assert.deepEqual(w.companions, [20, 7]);
+  assert.deepEqual(w.companions, [WEAPON_BALANCE.companionHP, 7]);
   assert.equal(fireWeapon(w, player, 0).shots.length, 6);
   w.companions[0] = 0;
   assert.equal(fireWeapon(w, player, 1).shots.length, 5);

@@ -4,6 +4,77 @@
  * Api
  * OpenAPI spec version: 0.2.0
  */
+export interface AudioFingerprint {
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  rms: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  onset: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  low: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  mid: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  high: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  centroid: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  flatness: number;
+  pulse: boolean;
+  /**
+     * @minimum 0
+     * @maximum 300
+     */
+  tempo: number;
+}
+
+export type SongAnalysisDocumentVersion = typeof SongAnalysisDocumentVersion[keyof typeof SongAnalysisDocumentVersion];
+
+
+export const SongAnalysisDocumentVersion = {
+  NUMBER_1: 1,
+} as const;
+
+export interface SongAnalysisDocument {
+  version: SongAnalysisDocumentVersion;
+  /**
+     * @minimum 1
+     * @maximum 720
+     */
+  duration: number;
+  /**
+     * @minimum 0.001
+     * @maximum 720
+     */
+  analyzedSeconds: number;
+  signature: AudioFingerprint;
+  /**
+     * @minItems 8
+     * @maxItems 8
+     */
+  motifs: AudioFingerprint[];
+}
+
 export interface HealthStatus {
   status: string;
 }
