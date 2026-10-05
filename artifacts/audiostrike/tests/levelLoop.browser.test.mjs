@@ -207,6 +207,11 @@ test('timed encounters stack, preserve playlist ownership, pause, pickups, and i
     });
     await page.clock.runFor(40);
     assert.equal((await snapshot()).playerHealth, 75, 'repair collects while death animation protects from damage');
+    await page.evaluate(() => {
+      window.__AUDIOSTRIKE_TEST__.clearArena();
+      window.__AUDIOSTRIKE_TEST__.setPlayer({ fireTimer: 1e9 });
+    });
+    await page.clock.runFor(40);
     const oldHealth = (await snapshot()).bosses[0].health;
     await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.drop('BOMB'));
     await page.clock.runFor(40);
@@ -257,6 +262,9 @@ test('timed encounters stack, preserve playlist ownership, pause, pickups, and i
     assert.equal((await snapshot()).audibleBossId, null);
     assert.equal((await snapshot()).stageAudioPaused, false, 'stage song resumes once no living bosses remain');
     await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.endRun());
+    await page.getByTestId('overlay-game-over').waitFor();
+    assert.deepEqual((await snapshot()).runProgress, { levelReached: 5, bossLevelReached: 4 });
+    assert.match(await page.getByTestId('text-run-progress').innerText(), /Level reached 5.*Boss reached at level 4/i);
     await page.getByTestId('button-replay-game-over').click();
     const replay = await snapshot();
     assert.equal(replay.level, 1); assert.deepEqual(replay.bosses, []); assert.equal(replay.encounter, null);

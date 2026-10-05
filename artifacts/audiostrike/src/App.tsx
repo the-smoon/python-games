@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Crosshair, Gamepad2, Headphones, Pause, Play, RotateCcw, Volume2, Zap } from 'lucide-react';
+import { submitRunScore, type RunScoreInput } from '@workspace/api-client-react';
 import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, encounterSignature, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
 import { audioIntensity, blendAudioSignals, bossHealth, chooseAttack, chooseMotion, generateForm, spawnProfile } from './encounterRules';
@@ -211,6 +212,14 @@ function drawJoystick(ctx: CanvasRenderingContext2D, joystick: Joystick) {
 function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const encountersRef = useRef(new EncounterScheduler<ActiveBoss>());
+  const runProgressRef = useRef<{ levelReached: number; bossLevelReached: number | null }>({
+    levelReached: 1,
+    bossLevelReached: null,
+  });
+  const activeRunIdRef = useRef<string | null>(null);
+  const finalRunRef = useRef<Omit<RunScoreInput, 'name'> | null>(null);
+  const pendingScoreRunsRef = useRef(new Set<string>());
+  const savedScoreRunsRef = useRef(new Set<string>());
   const soundtrackRef = useRef(new SoundtrackLifecycle());
   const testHarnessCleanupRef = useRef<() => void>(() => {});
   const testHarnessLoadingRef = useRef(false);
@@ -253,6 +262,9 @@ function Home() {
   const [musicWarning, setMusicWarning] = useState('');
   const [controllerStatus, setControllerStatus] = useState('Checking for controller…');
   const controllerStatusRef = useRef('Checking for controller…');
+  const [finalRun, setFinalRun] = useState<Omit<RunScoreInput, 'name'> | null>(null);
+  const [scoreName, setScoreName] = useState('');
+  const [scoreSaveState, setScoreSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const syncState = useCallback((next: GameState) => {
     gameRef.current.state = next;
@@ -414,6 +426,12 @@ function Home() {
     soundtrackRef.current.clear();
     pauseRef.current = { since: null, total: 0, tracks: [] };
     setPaused(false); setBossHud([]); setBossSecondsLeft(30);
+    activeRunIdRef.current = crypto.randomUUID();
+    finalRunRef.current = null;
+    runProgressRef.current = { levelReached: 1, bossLevelReached: null };
+    setFinalRun(null);
+    setScoreName('');
+    setScoreSaveState('idle');
     game.level = 1;
     loadLevelTracks(1);
     arsenalRef.current = { weapon: newWeaponState(), drops: [], beam: null, splashes: [],
@@ -516,6 +534,8 @@ function Home() {
       const features = game.bossFeatures ?? fallbackFeatures(28);
       const live = readReactiveTrack(game.bossReactive);
       const hp = bossHealth(features.duration, game.level);
+      runProgressRef.current.levelReached = Math.max(runProgressRef.current.levelReached, game.level);
+      runProgressRef.current.bossLevelReached = Math.max(runProgressRef.current.bossLevelReached ?? 0, game.level);
       game.player.y = clamp(game.player.y, 90, H - 150);
       const structure = features.signature;
       const reactiveSignature = game.bossReactive?.signature ?? live;
@@ -656,6 +676,7 @@ function Home() {
     const beginNextLevel = () => {
       const game = gameRef.current;
       game.level = nextLevel(game.level);
+      runProgressRef.current.levelReached = Math.max(runProgressRef.current.levelReached, game.level);
       loadLevelTracks(game.level);
       game.stageDone = false;
       game.spawnCooldown = 0;
@@ -673,15 +694,29 @@ function Home() {
       if (encountersRef.current.advance(gameNow(), defeatedId)) beginNextLevel();
     };
     const gameOver = () => {
+      const game = gameRef.current;
+      if (game.state === 'GAME_OVER') return;
+      const runId = activeRunIdRef.current ?? crypto.randomUUID();
+      activeRunIdRef.current = runId;
+      const summary = {
+        runId,
+        score: game.score,
+        levelReached: Math.max(runProgressRef.current.levelReached, game.level),
+        bossLevelReached: runProgressRef.current.bossLevelReached,
+      };
+      finalRunRef.current = summary;
+      setFinalRun(summary);
+      setScoreName('');
+      setScoreSaveState('idle');
       joystickRef.current = neutralJoystick();
       arsenalRef.current.beam = null;
       arsenalRef.current.weapon.chargeStartedAt = null;
-      gameRef.current.bullets = [];
+      game.bullets = [];
       stageAudioRef.current?.pause(); bossAudioRef.current?.pause();
       for (const boss of encountersRef.current.bosses) releaseBossAudio(boss);
       encountersRef.current.reset();
       soundtrackRef.current.clear();
-      gameRef.current.boss = null;
+      game.boss = null;
       syncState('GAME_OVER');
     };
     const canAttack = () => gameRef.current.state !== 'GAME_OVER';
@@ -1059,6 +1094,7 @@ function Home() {
       void import('./dev/gameTestHarness').then(({ installGameTestHarness }) => {
         testHarnessCleanupRef.current = installGameTestHarness(window, {
           getGame: () => gameRef.current,
+          getRunProgress: () => ({ ...runProgressRef.current }),
           getArsenal: () => arsenalRef.current,
           getEncounters: () => encountersRef.current,
           getStageAudio: () => stageAudioRef.current,
@@ -1157,6 +1193,24 @@ function Home() {
     resumeAudio();
     playTrack(audio, bossTrack ? 'Boss track' : 'Stage track');
   };
+  const handleSaveRunScore = useCallback(async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const run = finalRunRef.current;
+    const name = scoreName.trim();
+    if (!run || !name || pendingScoreRunsRef.current.has(run.runId) || savedScoreRunsRef.current.has(run.runId)) return;
+
+    pendingScoreRunsRef.current.add(run.runId);
+    setScoreSaveState('saving');
+    try {
+      await submitRunScore({ ...run, name });
+      savedScoreRunsRef.current.add(run.runId);
+      if (finalRunRef.current?.runId === run.runId) setScoreSaveState('saved');
+    } catch {
+      if (finalRunRef.current?.runId === run.runId) setScoreSaveState('error');
+    } finally {
+      pendingScoreRunsRef.current.delete(run.runId);
+    }
+  }, [scoreName]);
   const canStart = !playlistBusy && playlistTracks.length > 0;
   const isGame = state === 'COUNTDOWN' || state === 'PLAYING' || state === 'BOSS_INTRO' || state === 'BOSS' || state === 'GAME_OVER';
 
@@ -1220,7 +1274,42 @@ function Home() {
             {state === 'COUNTDOWN' && <div className="state-overlay" data-testid="overlay-countdown"><div><p className="font-mono text-[10px] uppercase tracking-[.28em] text-cyan-300">Get ready</p><div className="mt-2 text-8xl font-extrabold text-cyan-200" data-testid="text-countdown">{countdown}</div><p className="mt-1 font-mono text-[10px] uppercase tracking-[.18em] text-slate-500">Touch, left stick, or D-pad · weapons auto-fire</p></div></div>}
             {paused && <div className="state-overlay" data-testid="overlay-paused" role="dialog" aria-modal="true" aria-labelledby="pause-title"><div className="overlay-card"><h2 id="pause-title" className="text-4xl font-extrabold tracking-[.08em] text-cyan-200">PAUSED</h2><p className="mt-3 text-slate-300">Combat, timer, and music are paused.</p><button type="button" autoFocus onClick={togglePause} className="action-button mt-6 inline-flex items-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-xs font-bold uppercase text-cyan-200" data-testid="button-resume"><Play className="h-4 w-4" aria-hidden="true" /> Resume game</button><p className="mt-3 font-mono text-[10px] text-slate-400">Esc or P to resume</p></div></div>}
             {state === 'BOSS_INTRO' && <div className="pointer-events-none absolute inset-x-0 top-[17%] text-center" data-testid="overlay-boss-intro"><p className="font-mono text-xs font-bold uppercase tracking-[.24em] text-orange-300">Stage {hud.level} complete · incoming boss</p></div>}
-            {state === 'GAME_OVER' && <div className="state-overlay" data-testid="overlay-game-over"><div className="overlay-card"><p className="font-mono text-[10px] uppercase tracking-[.28em] text-red-300">Flight terminated</p><h2 className="mt-3 text-5xl font-extrabold tracking-[.08em] text-red-200">SYSTEM DOWN</h2><p className="mt-3 font-mono text-[10px] uppercase tracking-[.16em] text-slate-500">Final score {hud.score}. Tap replay to re-enter the mix.</p><button onClick={beginCountdown} className="action-button mt-7 inline-flex items-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-game-over"><RotateCcw className="h-3.5 w-3.5" /> Replay mission</button></div></div>}
+            {state === 'GAME_OVER' && finalRun && <div className="state-overlay" data-testid="overlay-game-over"><div className="overlay-card">
+              <p className="font-mono text-[10px] uppercase tracking-[.28em] text-red-300">Flight terminated</p>
+              <h2 className="mt-3 text-5xl font-extrabold tracking-[.08em] text-red-200">SYSTEM DOWN</h2>
+              <p className="mt-3 font-mono text-xs uppercase tracking-[.12em] text-slate-300" data-testid="text-final-run-score">Final score {finalRun.score}</p>
+              <p className="mt-2 font-mono text-[10px] uppercase tracking-[.12em] text-slate-400" data-testid="text-run-progress">
+                Level reached {finalRun.levelReached} · {finalRun.bossLevelReached === null ? 'No boss reached' : `Boss reached at level ${finalRun.bossLevelReached}`}
+              </p>
+              <form className="mt-5" onSubmit={handleSaveRunScore}>
+                <label htmlFor="run-score-name" className="mb-2 block font-mono text-[10px] uppercase tracking-[.16em] text-cyan-200">Enter a callsign to save this run</label>
+                <input
+                  id="run-score-name"
+                  className="w-full rounded-md border border-cyan-300/40 bg-slate-950/80 px-3 py-2 text-center font-mono text-sm text-white outline-none focus:border-cyan-200 focus:ring-2 focus:ring-cyan-300/30"
+                  value={scoreName}
+                  onChange={(event) => setScoreName(event.currentTarget.value)}
+                  maxLength={24}
+                  autoComplete="nickname"
+                  aria-label="Name for saved run score"
+                  data-testid="input-run-score-name"
+                />
+                <p className="mt-1 font-mono text-[9px] text-slate-500">Up to 24 characters</p>
+                <p className="mt-2 min-h-4 font-mono text-[10px] text-cyan-200" role="status" aria-live="polite" data-testid="status-run-score">
+                  {scoreSaveState === 'saving' && 'Saving run…'}
+                  {scoreSaveState === 'saved' && 'Run score saved'}
+                  {scoreSaveState === 'error' && 'Could not save this run. Check your connection and retry.'}
+                </p>
+                <div className="mt-3 flex flex-col justify-center gap-2 sm:flex-row">
+                  {scoreSaveState !== 'saved' && <button
+                    type="submit"
+                    disabled={!scoreName.trim() || scoreSaveState === 'saving'}
+                    className="action-button inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
+                    data-testid="button-save-run-score"
+                  >{scoreSaveState === 'saving' ? 'Saving…' : scoreSaveState === 'error' ? 'Retry saving score' : 'Save run score'}</button>}
+                  <button type="button" onClick={beginCountdown} className="action-button inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-game-over"><RotateCcw className="h-3.5 w-3.5" /> Replay mission</button>
+                </div>
+              </form>
+            </div></div>}
           </div>
         </section>
       )}

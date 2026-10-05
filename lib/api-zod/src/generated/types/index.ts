@@ -11,6 +11,8 @@ export * from './healthStatus';
 export * from './ownerLoginInput';
 export * from './ownerStatus';
 export * from './playlistSummary';
+export * from './runScore';
+export * from './runScoreInput';
 export * from './savedPlaylist';
 export * from './savePlaylistInput';
 export * from './songAnalysisDocument';

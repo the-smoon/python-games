@@ -24,6 +24,8 @@ import type {
   OwnerLoginInput,
   OwnerStatus,
   PlaylistSummary,
+  RunScore,
+  RunScoreInput,
   SavePlaylistInput,
   SavedPlaylist,
   SongAnalysisDocument
@@ -333,6 +335,71 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getStoreSongAnalysisMutationOptions(options));
+    }
+
+export const getSubmitRunScoreUrl = () => {
+
+
+
+
+  return `/api/run-scores`
+}
+
+export const submitRunScore = async (runScoreInput: RunScoreInput, options?: RequestInit): Promise<RunScore> => {
+
+  return customFetch<RunScore>(getSubmitRunScoreUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(runScoreInput)
+  }
+);}
+
+
+
+
+
+export const getSubmitRunScoreMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitRunScore>>, TError,{data: BodyType<RunScoreInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitRunScore>>, TError,{data: BodyType<RunScoreInput>}, TContext> => {
+
+const mutationKey = ['submitRunScore'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitRunScore>>, {data: BodyType<RunScoreInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  submitRunScore(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SubmitRunScoreMutationResult = NonNullable<Awaited<ReturnType<typeof submitRunScore>>>
+    export type SubmitRunScoreMutationBody = BodyType<RunScoreInput>
+    export type SubmitRunScoreMutationError = ErrorType<void>
+
+    export const useSubmitRunScore = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitRunScore>>, TError,{data: BodyType<RunScoreInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof submitRunScore>>,
+        TError,
+        {data: BodyType<RunScoreInput>},
+        TContext
+      > => {
+      return useMutation(getSubmitRunScoreMutationOptions(options));
     }
 
 export const getGetDriveAudioUrl = (id: string,) => {

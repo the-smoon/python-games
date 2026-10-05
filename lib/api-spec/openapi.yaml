@@ -58,6 +58,36 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SongAnalysisDocument"
+  /run-scores:
+    post:
+      operationId: submitRunScore
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunScoreInput"
+      responses:
+        "201":
+          description: Run score saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunScore"
+        "200":
+          description: This run was already saved; the original score is returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunScore"
+        "400":
+          description: Invalid run score
+        "403":
+          description: Cross-origin submission rejected
+        "429":
+          description: Submission limit reached
+        "503":
+          description: Score storage is temporarily unavailable
   /playlists/audio/{id}:
     get:
       operationId: getDriveAudio
@@ -211,6 +241,58 @@ components:
           maxItems: 8
           items:
             $ref: "#/components/schemas/AudioFingerprint"
+    RunScoreInput:
+      type: object
+      additionalProperties: false
+      required: [runId, name, score, levelReached, bossLevelReached]
+      properties:
+        runId:
+          type: string
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 24
+          description: Player-selected display name without control characters
+        score:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+        levelReached:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        bossLevelReached:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 100000
+    RunScore:
+      type: object
+      additionalProperties: false
+      required: [id, runId, name, score, levelReached, bossLevelReached, createdAt]
+      properties:
+        id:
+          type: integer
+        runId:
+          type: string
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        name:
+          type: string
+        score:
+          type: integer
+          minimum: 0
+          maximum: 2147483647
+        levelReached:
+          type: integer
+          minimum: 1
+          maximum: 100000
+        bossLevelReached:
+          type: [integer, "null"]
+          minimum: 1
+          maximum: 100000
+        createdAt:
+          type: string
+          format: date-time
     HealthStatus:
       type: object
       required: [status]

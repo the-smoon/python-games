@@ -11,6 +11,7 @@ type SpectrumBand = 'bass' | 'bright';
 
 export type AudioStrikeTestApi = {
   snapshot: () => object;
+  setScore: (score: number) => void;
   finishBoss: (id?: number) => void;
   spawnSubBoss: () => void;
   setEncounterElapsed: (seconds: number) => void;
@@ -34,6 +35,7 @@ type HarnessWindow = Window & {
 
 type HarnessRuntime = {
   getGame: () => CombatWorld;
+  getRunProgress: () => { levelReached: number; bossLevelReached: number | null };
   getArsenal: () => CombatArsenal;
   getEncounters: () => EncounterScheduler<ActiveBoss>;
   getStageAudio: () => HTMLAudioElement | null;
@@ -67,6 +69,7 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         state: game.state,
         paused: runtime.paused(),
         level: game.level,
+        runProgress: runtime.getRunProgress(),
         spawnIndex: game.spawnIndex,
         enemyCount: game.enemies.length,
         subBossCount: game.enemies.filter((enemy) => enemy.subBoss).length,
@@ -135,6 +138,7 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         enemyShots: game.enemyBullets.map((shot) => ({ ...shot })),
       };
     },
+    setScore: (score) => { runtime.getGame().score = score; },
     finishBoss: runtime.finishBoss,
     spawnSubBoss: runtime.spawnSubBoss,
     setEncounterElapsed: (seconds) => runtime.getEncounters().setEncounterStart(runtime.gameNow() - seconds * 1000),

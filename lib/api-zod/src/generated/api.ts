@@ -298,6 +298,47 @@ export const StoreSongAnalysisResponse = zod.object({
 })
 
 
+export const submitRunScoreBodyRunIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+export const submitRunScoreBodyNameMax = 24;
+
+export const submitRunScoreBodyScoreMin = 0;
+export const submitRunScoreBodyScoreMax = 2147483647;
+
+export const submitRunScoreBodyLevelReachedMax = 100000;
+
+export const submitRunScoreBodyBossLevelReachedMax = 100000;
+
+
+
+export const SubmitRunScoreBody = zod.object({
+  "runId": zod.string().regex(submitRunScoreBodyRunIdRegExp),
+  "name": zod.string().min(1).max(submitRunScoreBodyNameMax).describe('Player-selected display name without control characters'),
+  "score": zod.number().min(submitRunScoreBodyScoreMin).max(submitRunScoreBodyScoreMax),
+  "levelReached": zod.number().min(1).max(submitRunScoreBodyLevelReachedMax),
+  "bossLevelReached": zod.number().min(1).max(submitRunScoreBodyBossLevelReachedMax).nullable()
+})
+
+export const submitRunScoreResponseRunIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+export const submitRunScoreResponseScoreMin = 0;
+export const submitRunScoreResponseScoreMax = 2147483647;
+
+export const submitRunScoreResponseLevelReachedMax = 100000;
+
+export const submitRunScoreResponseBossLevelReachedMax = 100000;
+
+
+
+export const SubmitRunScoreResponse = zod.object({
+  "id": zod.number(),
+  "runId": zod.string().regex(submitRunScoreResponseRunIdRegExp),
+  "name": zod.string(),
+  "score": zod.number().min(submitRunScoreResponseScoreMin).max(submitRunScoreResponseScoreMax),
+  "levelReached": zod.number().min(1).max(submitRunScoreResponseLevelReachedMax),
+  "bossLevelReached": zod.number().min(1).max(submitRunScoreResponseBossLevelReachedMax).nullable(),
+  "createdAt": zod.coerce.date()
+})
+
+
 export const getDriveAudioPathIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,200}$');
 
 

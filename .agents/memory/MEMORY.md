@@ -9,6 +9,7 @@
 - [Weapon switching tradeoffs](audiostrike-weapon-intent.md) — rank loss is intentional; wingmen alone are destructible upgrades, and freeze stays distinct from screen-clearing bombs.
 - [Playlist intent](audiostrike-playlist-intent.md) — Drive playlists are shared, uploads owner-only; odd lists pair continuously and replay retains the once-shuffled order.
 - [API codegen compatibility](api-codegen-compatibility.md) — formatted validators must match the installed Zod major version, not the generator's assumed default.
+- [API route test bundling](api-route-test-bundling.md) — inject persistence in route tests; bundle API validators and leave service dependencies external.
 - [Boss survival intent](audiostrike-boss-survival-intent.md) — surviving bosses must not delay scheduled arrivals; newest living boss owns the shared soundtrack.
 - [Direct Node tests for AudioStrike](audiostrike-direct-node-tests.md) — runtime imports loaded by Node tests need explicit `.ts` extensions even when Vite accepts extensionless imports.
 - [Geometric visuals and death effects](audiostrike-effects-intent.md) — clean forms, permanent composite boss hulls, bounded pixel/debris deaths, and non-boss disruption.

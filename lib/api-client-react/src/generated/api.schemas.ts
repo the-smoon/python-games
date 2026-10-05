@@ -75,6 +75,57 @@ export interface SongAnalysisDocument {
   motifs: AudioFingerprint[];
 }
 
+export interface RunScoreInput {
+  /** @pattern ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ */
+  runId: string;
+  /**
+     * Player-selected display name without control characters
+     * @minLength 1
+     * @maxLength 24
+     */
+  name: string;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     */
+  score: number;
+  /**
+     * @minimum 1
+     * @maximum 100000
+     */
+  levelReached: number;
+  /**
+     * @minimum 1
+     * @maximum 100000
+     * @nullable
+     */
+  bossLevelReached: number | null;
+}
+
+export interface RunScore {
+  id: number;
+  /** @pattern ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ */
+  runId: string;
+  name: string;
+  /**
+     * @minimum 0
+     * @maximum 2147483647
+     */
+  score: number;
+  /**
+     * @minimum 1
+     * @maximum 100000
+     */
+  levelReached: number;
+  /**
+     * @minimum 1
+     * @maximum 100000
+     * @nullable
+     */
+  bossLevelReached: number | null;
+  createdAt: string;
+}
+
 export interface HealthStatus {
   status: string;
 }
