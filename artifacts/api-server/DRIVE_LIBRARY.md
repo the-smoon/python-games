@@ -1,4 +1,4 @@
-# AudioStrike Drive library
+# Rhythm Fighter Drive library
 
 The server uses the Replit Google Drive connector. Authorization stays on the
 server; API responses contain file IDs, titles and sizes, never access tokens.
@@ -10,8 +10,8 @@ server; API responses contain file IDs, titles and sizes, never access tokens.
 - `AUDIOSTRIKE_OWNER_PASSWORD`: a strong owner-only upload password in Secrets.
 - `SESSION_SECRET`: the existing session-signing secret in Secrets.
 
-The server creates or uses exactly one direct child named **AudioStrike
-Playlists**. Playlist JSON files contain `{version: 1, trackIds: [...]}` only.
+The server creates or reuses one direct child folder for shared playlists.
+Playlist JSON files contain `{version: 1, trackIds: [...]}` only.
 Songs must be direct children of the music folder; shortcuts and files outside
 these folders are not followed. Existing MP3s can be added by the owner in Drive,
 or through the protected uploader. Use Refresh to see changes.

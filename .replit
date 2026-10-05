@@ -59,7 +59,7 @@ author = 13212543
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "AudioStrike Game"
+args = "artifacts/audiostrike: web"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"

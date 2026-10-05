@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "AudioStrike"
+title = "Rhythm Fighter"
 description = "A music-driven top-down aerial shooter playable in the browser with mouse and touchscreen controls."
 version = "1.0.0"
 id = "artifacts/audiostrike"

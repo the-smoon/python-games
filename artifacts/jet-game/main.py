@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AudioStrike — entry point.
+Rhythm Fighter — entry point.
 
 Initialises pygame, runs the native file-picker twice (stage song + boss
 song), then hands off to the Game class.
@@ -34,7 +34,7 @@ def _welcome_screen(screen: pygame.Surface, font_xl, font_md, font_sm) -> None:
     """Brief splash before the first file picker opens."""
     screen.fill(DARK_BG)
 
-    title = font_xl.render("AUDIOSTRIKE", True, CYAN)
+    title = font_xl.render("RHYTHM FIGHTER", True, CYAN)
     screen.blit(title, (SCREEN_W // 2 - title.get_width() // 2, 180))
 
     tag = font_md.render("Music-driven aerial combat", True, MID_GRAY)

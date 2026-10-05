@@ -1,5 +1,5 @@
 """
-AudioStrike — beat-synchronised enemy spawner.
+Rhythm Fighter — beat-synchronised enemy spawner.
 
 The Spawner reads the AudioFeatures timeline and, on each beat, determines
 what kind of enemies to create based on the audio characteristics at that

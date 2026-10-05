@@ -96,7 +96,7 @@ test('cached analysis survives reload; five-second zones, temporary buffs and bo
     assert.ok(recovered.enemies[0].buffUntil < recovered.now);
     assert.ok(recovered.player.debuffUntil < recovered.now);
     await mkdir('screenshots', { recursive: true });
-    await page.screenshot({ path: 'screenshots/audiostrike-geometric-boss.png' });
+    await page.screenshot({ path: 'screenshots/rhythmfighter-geometric-boss.png' });
     await page.evaluate(id => {
       const api = window.__AUDIOSTRIKE_TEST__;
       api.setBossHealth(id, 1); api.drop('BOMB');
@@ -110,7 +110,7 @@ test('cached analysis survives reload; five-second zones, temporary buffs and bo
     assert.ok(survivor.stunnedUntil > death.now);
     assert.ok(survivor.confusedUntil > death.now + 5);
     assert.equal(death.blasts.filter(b => b.ownerId === boss.id).length, 0);
-    await page.screenshot({ path: 'screenshots/audiostrike-boss-death.png' });
+    await page.screenshot({ path: 'screenshots/rhythmfighter-boss-death.png' });
     await page.clock.runFor(700);
     assert.ok((await snap()).debris.some(d => d.generation > 0), 'large pieces shed smaller debris');
     await page.clock.runFor(5100);

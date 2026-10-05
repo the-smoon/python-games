@@ -1,5 +1,5 @@
 """
-AudioStrike — pygame-native file browser.
+Rhythm Fighter — pygame-native file browser.
 
 Presents a scrollable directory listing so the user can pick audio files
 without needing tkinter or any external GUI toolkit.

@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core';
 import { STAGE_LEVEL_SECONDS } from '../src/gameRules.ts';
 import { bossHealth } from '../src/encounterRules.ts';
 
-// Run against the managed AudioStrike preview: pnpm --filter @workspace/audiostrike test:browser
+// Run against the managed Rhythm Fighter preview: pnpm --filter @workspace/audiostrike test:browser
 // Override AUDIOSTRIKE_TEST_URL and CHROMIUM_PATH when running outside Replit.
 const url = process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/';
 
@@ -110,7 +110,7 @@ test('connected gamepads actually steer the drawn ship in PLAYING and BOSS', { t
       };
     });
     const response = await page.goto(url);
-    assert.equal(response?.status(), 200, `AudioStrike preview must be running at ${url}`);
+    assert.equal(response?.status(), 200, `Rhythm Fighter preview must be running at ${url}`);
     await selectMockPlaylist(page, [{ name: 'stage.mp3', buffer: silentWav() }, { name: 'boss.mp3', buffer: silentWav() }]);
     await page.locator('[data-testid="button-analyze"]').click();
     await page.locator('[data-testid="text-stage-time"]').waitFor({ timeout: 8000 });

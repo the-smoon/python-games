@@ -244,7 +244,7 @@ test('timed encounters stack, preserve playlist ownership, pause, pickups, and i
     }
     const hud = await page.getByTestId('hud-bosses').boundingBox();
     assert.ok(hud.x >= 0 && hud.x + hud.width <= 412, 'multi-boss HUD fits portrait viewport');
-    await page.screenshot({ path: '/tmp/audiostrike-stacked-bosses-portrait.png' });
+    await page.screenshot({ path: '/tmp/rhythmfighter-stacked-bosses-portrait.png' });
     await page.evaluate((id) => window.__AUDIOSTRIKE_TEST__.finishBoss(id), first.id);
     assert.equal((await snapshot()).level, 4, 'older carry-over defeat never advances current encounter');
     assert.equal((await snapshot()).audibleBossId, fourth.id);

@@ -1,5 +1,5 @@
 """
-AudioStrike — music analysis module.
+Rhythm Fighter — music analysis module.
 
 Loads an audio file with librosa and produces a time-indexed feature
 timeline that the Spawner reads to drive enemy generation.

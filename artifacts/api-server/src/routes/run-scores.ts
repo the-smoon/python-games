@@ -78,7 +78,7 @@ export function createRunScoresRouter(save: SaveRunScore = saveRunScore) {
       foreignOrigin = true;
     }
     if (foreignOrigin) {
-      res.status(403).json({ error: "Save run scores from AudioStrike itself." });
+      res.status(403).json({ error: "Save run scores from Rhythm Fighter itself." });
       return;
     }
 

@@ -133,7 +133,7 @@ export class DriveLibrary {
         const folder = await this.metadata(this.musicFolder());
         if (folder.trashed || folder.mimeType !== "application/vnd.google-apps.folder") throw new LibraryError(503, "Configured Drive music folder is unavailable");
         const matches = (await this.list(this.musicFolder())).filter(file => file.name === "AudioStrike Playlists" && file.mimeType === "application/vnd.google-apps.folder");
-        if (matches.length > 1) throw new LibraryError(409, "Multiple AudioStrike Playlists folders exist. Ask the owner to keep one.");
+        if (matches.length > 1) throw new LibraryError(409, "Multiple shared playlist folders exist. Ask the owner to keep one.");
         if (matches.length) return fileId(matches[0].id);
         const created = await (await this.call("/drive/v3/files?fields=id&supportsAllDrives=true", {
           method: "POST", headers: { "Content-Type": "application/json" },

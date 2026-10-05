@@ -1,5 +1,5 @@
 """
-AudioStrike — heads-up display rendering helpers.
+Rhythm Fighter — heads-up display rendering helpers.
 """
 
 import pygame

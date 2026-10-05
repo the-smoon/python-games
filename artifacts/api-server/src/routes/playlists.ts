@@ -47,7 +47,7 @@ export function createPlaylistRouter(library: DriveLibrary = driveLibrary) {
   const sameOrigin: RequestHandler = (req, res, next) => {
     const origin = req.headers.origin;
     if (req.headers["sec-fetch-site"] === "cross-site" || (origin && (!/^https?:\/\//.test(origin) || new URL(origin).host !== req.get("host")))) {
-      res.status(403).json({ error: "Use the music library from AudioStrike itself" }); return;
+      res.status(403).json({ error: "Use the music library from Rhythm Fighter itself" }); return;
     }
     next();
   };

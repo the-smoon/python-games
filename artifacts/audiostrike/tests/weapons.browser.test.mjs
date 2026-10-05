@@ -136,7 +136,7 @@ test('real pickups drive ranked weapons, shield, companions, freeze, piercing la
     assert.equal((await snap()).enemies[0].health, 905, 'fading beam does not repeat damage');
     await pickup('LASER');
     assert.equal((await snap()).weapon.rank, 2);
-    await page.screenshot({ path: '/tmp/audiostrike-weapons-portrait.png' });
+    await page.screenshot({ path: '/tmp/rhythmfighter-weapons-portrait.png' });
     const hud = await page.getByTestId('hud-weapon').boundingBox();
     assert.ok(hud.x >= 0 && hud.x + hud.width <= 412);
 

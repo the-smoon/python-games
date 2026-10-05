@@ -15,7 +15,7 @@ test('live Drive shared save/load and owner-only MP3 upload', {
   const executablePath = process.env.CHROMIUM_PATH || execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim();
   const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
   const created = [], connectors = new ReplitConnectors();
-  const unique = `AudioStrike verification ${randomUUID()}`;
+  const unique = `Rhythm Fighter verification ${randomUUID()}`;
   try {
     const context = await browser.newContext({ viewport: { width: 402, height: 874 } });
     context.setDefaultTimeout(15_000);

@@ -44,7 +44,7 @@ router.put("/song-analysis/:hash", async (req, res): Promise<void> => {
   try { if (origin) foreignOrigin ||= !/^https?:\/\//.test(origin) || new URL(origin).host !== req.get("host"); }
   catch { foreignOrigin = true; }
   if (foreignOrigin) {
-    res.status(403).json({ error: "Save song analysis from AudioStrike itself" }); return;
+    res.status(403).json({ error: "Save song analysis from Rhythm Fighter itself" }); return;
   }
   const params = StoreSongAnalysisParams.safeParse(req.params), body = StoreSongAnalysisBody.safeParse(req.body);
   if (!params.success || !body.success) { res.status(400).json({ error: "Invalid song analysis document" }); return; }

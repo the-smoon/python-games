@@ -1,5 +1,5 @@
 """
-AudioStrike — Flask web server.
+Rhythm Fighter — Flask web server.
 
 Serves the browser game and handles server-side audio analysis via librosa.
 """
@@ -52,7 +52,7 @@ def upload():
         return jsonify({"error": "Both stage and boss files are required"}), 400
 
     session_id = uuid.uuid4().hex[:10]
-    session_dir = os.path.join(tempfile.gettempdir(), "audiostrike", session_id)
+    session_dir = os.path.join(tempfile.gettempdir(), "rhythmfighter", session_id)
     os.makedirs(session_dir, exist_ok=True)
 
     stage_ext = os.path.splitext(stage_file.filename)[1] or ".mp3"
@@ -115,5 +115,5 @@ def features(session_id):
 
 
 if __name__ == "__main__":
-    print(f"[AudioStrike] Starting on http://0.0.0.0:{PORT}")
+    print(f"[Rhythm Fighter] Starting on http://0.0.0.0:{PORT}")
     app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)

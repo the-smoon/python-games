@@ -1215,14 +1215,14 @@ function Home() {
   const isGame = state === 'COUNTDOWN' || state === 'PLAYING' || state === 'BOSS_INTRO' || state === 'BOSS' || state === 'GAME_OVER';
 
   return (
-    <main className="arcade-app" data-testid="page-audiostrike">
+    <main className="arcade-app" data-testid="page-rhythm-fighter">
       <div className="scanline" aria-hidden="true" />
       {!isGame && (
         <section className="upload-shell arcade-grid flex min-h-[100dvh] items-center justify-center px-4 py-10" data-testid="panel-upload">
           <div className="w-full max-w-[560px]">
             <div className="mb-9 text-center">
               <div className="mb-3 flex items-center justify-center gap-2 text-[10px] font-bold uppercase tracking-[.32em] text-cyan-300/60"><Zap className="h-3.5 w-3.5" /> Local signal combat</div>
-              <h1 className="title-mark text-5xl font-extrabold sm:text-7xl" data-testid="text-title">AUDIOSTRIKE</h1>
+              <h1 className="title-mark text-5xl font-extrabold sm:text-7xl" data-testid="text-title">RHYTHM FIGHTER</h1>
               <p className="mt-3 font-mono text-[11px] uppercase tracking-[.22em] text-slate-500">Music-driven aerial combat</p>
             </div>
             {state === 'ANALYZING' ? (
@@ -1249,7 +1249,7 @@ function Home() {
       {isGame && (
         <section className="game-shell" data-testid="panel-game">
           <div className="game-frame">
-            <canvas ref={canvasRef} className="game-canvas" onPointerDown={onJoystickDown} onPointerMove={onJoystickMove} onPointerUp={onJoystickRelease} onPointerCancel={onJoystickRelease} onLostPointerCapture={onJoystickRelease} data-testid="canvas-game" aria-label="AudioStrike game field. Steer with touch or a game controller; weapons fire automatically." />
+            <canvas ref={canvasRef} className="game-canvas" onPointerDown={onJoystickDown} onPointerMove={onJoystickMove} onPointerUp={onJoystickRelease} onPointerCancel={onJoystickRelease} onLostPointerCapture={onJoystickRelease} data-testid="canvas-game" aria-label="Rhythm Fighter game field. Steer with touch or a game controller; weapons fire automatically." />
             <WeaponHUD {...combatHud} />
             {(state === 'PLAYING' || state === 'BOSS_INTRO' || state === 'BOSS') && !paused && <button type="button" className="pause-button" onClick={togglePause} data-testid="button-pause" aria-label="Pause game" title="Pause game (Esc or P)"><Pause className="h-4 w-4" aria-hidden="true" /><span>Pause</span></button>}
             <div className="hud-top">

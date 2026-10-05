@@ -1,11 +1,11 @@
-# AudioStrike
+# Rhythm Fighter
 
 A top-down vertical-scrolling shooter where all enemy behaviour — count, speed, health, fire rate, movement patterns, and boss phases — is driven in real time by audio analysis of two songs you choose.
 
 ## Run & Operate
 
 ### Game
-- Start the **AudioStrike Game** workflow in the VNC tab
+- Open the **Rhythm Fighter** web preview
 - You'll be prompted to pick two audio files:
   1. **Stage song** — drives all regular enemy generation
   2. **Boss song** — plays during the entire boss fight

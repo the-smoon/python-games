@@ -1,12 +1,12 @@
 """
-AudioStrike — all game constants live here.
+Rhythm Fighter — all game constants live here.
 """
 
 # ── Screen ────────────────────────────────────────────────────────────────────
 SCREEN_W = 800
 SCREEN_H = 900
 FPS = 60
-TITLE = "AudioStrike"
+TITLE = "Rhythm Fighter"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 BLACK        = (  0,   0,   0)

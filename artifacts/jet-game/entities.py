@@ -1,5 +1,5 @@
 """
-AudioStrike — all game entities: Player, Bullet, EnemyBullet, Enemy, Boss, Particle.
+Rhythm Fighter — all game entities: Player, Bullet, EnemyBullet, Enemy, Boss, Particle.
 """
 
 import pygame

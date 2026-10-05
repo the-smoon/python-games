@@ -1,5 +1,5 @@
 """
-AudioStrike — main Game class.
+Rhythm Fighter — main Game class.
 
 State machine:
   ANALYZING  →  COUNTDOWN  →  PLAYING  →  BOSS_INTRO  →  BOSS
@@ -460,7 +460,7 @@ class Game:
     # ── State-specific draw methods ───────────────────────────────────────────
 
     def _draw_analyzing(self):
-        title = self.font_xl.render("AUDIOSTRIKE", True, CYAN)
+        title = self.font_xl.render("RHYTHM FIGHTER", True, CYAN)
         self.screen.blit(title, (SCREEN_W // 2 - title.get_width() // 2, 170))
 
         sub = self.font_md.render("Music-driven aerial combat", True, MID_GRAY)
@@ -501,7 +501,7 @@ class Game:
             ly += 22
 
     def _draw_countdown(self):
-        title = self.font_xl.render("AUDIOSTRIKE", True, CYAN)
+        title = self.font_xl.render("RHYTHM FIGHTER", True, CYAN)
         self.screen.blit(title, (SCREEN_W // 2 - title.get_width() // 2, 180))
 
         num = self.font_xl.render(str(self.countdown), True, YELLOW)
