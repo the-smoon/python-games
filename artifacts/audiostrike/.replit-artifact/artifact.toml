@@ -1,5 +1,5 @@
 kind = "web"
-previewPath = "/"
+previewPath = "/audiostrike-legacy/"
 title = "Rhythm Fighter"
 description = "A music-driven top-down aerial shooter playable in the browser with mouse and touchscreen controls."
 version = "1.0.0"
@@ -8,7 +8,7 @@ router = "path"
 
 [[services]]
 name = "web"
-paths = [ "/" ]
+paths = [ "/audiostrike-legacy/" ]
 localPort = 20414
 
 [services.development]
@@ -25,4 +25,4 @@ to = "/index.html"
 
 [services.env]
 PORT = "20414"
-BASE_PATH = "/"
+BASE_PATH = "/audiostrike-legacy/"

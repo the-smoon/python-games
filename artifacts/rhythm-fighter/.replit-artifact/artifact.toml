@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Rhythm Fighter"
+description = "A music-driven browser arcade shooter where selected tracks shape enemy patterns, attacks, and boss fights."
+version = "1.0.0"
+id = "artifacts/rhythm-fighter"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19145
+
+[services.development]
+run = "pnpm --filter @workspace/rhythm-fighter run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/rhythm-fighter", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/rhythm-fighter/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19145"
+BASE_PATH = "/"

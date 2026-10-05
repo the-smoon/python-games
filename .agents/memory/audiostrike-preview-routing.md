@@ -9,11 +9,11 @@ The Rhythm Fighter browser game is served reliably through its managed root web 
 
 **How to apply:** Keep `artifacts/audiostrike` as the canonical browser app and use its managed `artifacts/audiostrike: web` workflow and root preview when testing or sharing the game.
 
-The game's public name is Rhythm Fighter; the current artifact slug remains `audiostrike`.
+The primary artifact is now `rhythm-fighter` at the root preview path. The immutable `audiostrike` artifact remains on `/audiostrike-legacy/` during the identity transition.
 
-**Why:** The user identified Rhythm Fighter as the game's actual name. Changing the registered slug affects preview routes, workflows, and package references, so it is a separate migration.
+**Why:** The registered artifact ID cannot be changed in place, and the user required the previous published version to remain available until the new identity was verified.
 
-**How to apply:** Use Rhythm Fighter in public-facing copy; keep the existing slug for routing until that migration is planned.
+**How to apply:** Use `artifacts/rhythm-fighter` and its managed root workflow for new previews. Keep the old artifact isolated on its legacy route; do not move the old ID or publish over the prior version without an approved release.
 
 The user specifically approved the boss-fight feel as a good baseline; preserve that encounter structure while tuning projectile balance.
 

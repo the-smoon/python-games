@@ -6,7 +6,8 @@ import { setBaseUrl } from '@workspace/api-client-react';
 
 import './index.css';
 
-setBaseUrl(import.meta.env.BASE_URL.replace(/\/$/, '') || null);
+// API routes are shared at /api, independently of this artifact's preview prefix.
+setBaseUrl(null);
 
 createRoot(document.getElementById('root')!, {
   // Keeps caught errors off reportError(), which would raise the dev overlay.

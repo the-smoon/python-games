@@ -35,6 +35,12 @@ has a 120-second deadline. Upload bodies have a 60-second receive timeout.
 These in-memory caps are per server instance, not a distributed quota.
 
 Tests: `pnpm --filter @workspace/api-server test` and
-`pnpm --filter @workspace/audiostrike test`. Browser regressions use the playlist
+`pnpm --filter @workspace/rhythm-fighter test`. Browser regressions use the playlist
 picker with synthetic audio fixtures; the live verification test additionally
 uses the connected Drive account and cleans up only files it creates.
+
+During the Rhythm Fighter rename, keep the existing `AUDIOSTRIKE_MUSIC_FOLDER_ID`,
+`AUDIOSTRIKE_OWNER_PASSWORD`, and `SESSION_SECRET` configuration names, the
+`audiostrike_owner` session cookie, and the `AudioStrike Playlists` Drive folder.
+They identify existing saved playlists and owner sessions; do not create
+replacement folders or require users to change their existing Secrets.

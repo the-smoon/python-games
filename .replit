@@ -9,6 +9,7 @@ args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
+runButton = "Project"
 
 [[workflows.workflow]]
 name = "artifacts/api-server: API Server"
@@ -59,7 +60,7 @@ author = 13212543
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "artifacts/audiostrike: web"
+args = "artifacts/rhythm-fighter: web"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"

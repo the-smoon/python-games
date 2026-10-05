@@ -1,0 +1,61 @@
+.weapon-hud {
+  position: absolute;
+  z-index: 3;
+  top: 58px;
+  left: 12px;
+  display: grid;
+  gap: 3px;
+  width: 132px;
+  pointer-events: none;
+  font: 10px 'Space Mono', monospace;
+  color: #d8f6ff;
+  --wc: #ffe45e;
+}
+.weapon-hud[data-type='SPREAD'] { --wc: #ff9a52; }
+.weapon-hud[data-type='LASER'] { --wc: #ee8cff; }
+.weapon-hud > * { background: rgba(7,8,15,.72); padding: 3px 6px; }
+.weapon-name {
+  border-left: 2px solid var(--wc);
+  font: 700 14px 'Barlow Condensed', sans-serif;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--wc);
+  display: flex;
+  justify-content: space-between;
+}
+.weapon-ranks { display: flex; gap: 3px; }
+.weapon-rank { flex: 1; height: 5px; background: #213142; transform: skewX(-22deg); }
+.weapon-rank.on { background: var(--wc); }
+.weapon-timer { display: flex; justify-content: space-between; }
+.weapon-timer.rapid { border-left: 2px solid #56e9ff; color: #56e9ff; }
+.weapon-timer.shield { border-left: 2px solid #7cb8ff; color: #9fd0ff; }
+.weapon-timer.crew { border-left: 2px solid #ffe45e; color: #ffe45e; }
+.weapon-laser { border-left: 2px solid #ee8cff; color: #f6c8ff; }
+.weapon-laser .bar { height: 4px; margin-top: 2px; background: #2a1d33; overflow: hidden; }
+.weapon-laser .bar i { display: block; height: 100%; background: #ee8cff; transform-origin: left; }
+.weapon-laser.ready { color: #fff; animation: weapon-pulse .8s ease-in-out infinite; }
+.weapon-laser small { display: block; font-size: 9px; opacity: .75; }
+.weapon-message {
+  position: absolute;
+  z-index: 3;
+  top: 26%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  font: 700 18px 'Barlow Condensed', sans-serif;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #fff;
+  background: rgba(7,8,15,.78);
+  border: 1px solid rgba(0,229,255,.5);
+  animation: weapon-pop .3s ease-out both;
+}
+@keyframes weapon-pulse { 50% { opacity: .6; } }
+@keyframes weapon-pop { from { opacity: 0; transform: translate(-50%, 8px) scale(.9); } }
+@media (prefers-reduced-motion: reduce) { .weapon-laser.ready, .weapon-message { animation: none; } }
+@media (max-width: 640px) {
+  .weapon-hud { left: 8px; top: max(60px, calc(env(safe-area-inset-top) + 48px)); }
+  .weapon-message { max-width: calc(100% - 24px); white-space: normal; text-align: center; }
+}

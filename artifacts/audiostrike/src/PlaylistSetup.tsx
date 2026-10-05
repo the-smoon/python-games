@@ -7,7 +7,8 @@ import {
 } from '@workspace/api-client-react';
 import { moveTrack, type LocalTrack } from './playlistRules';
 
-const api = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/playlists`;
+// The shared API has its own /api route, separate from this legacy preview prefix.
+const api = '/api/playlists';
 const MAX_TRACK = 24 * 1024 * 1024;
 const MAX_TOTAL = 192 * 1024 * 1024;
 const MAX_TRACKS = 20;

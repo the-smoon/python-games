@@ -61,6 +61,7 @@ test("shared playlists save ordered references, load and never overwrite", async
   const saved = await drive.library.save("Test", ["C", "A", "B"]);
   assert.equal(saved.name, "Test");
   assert.deepEqual(JSON.parse(drive.contents.get(saved.id)!.toString()), { version: 1, trackIds: ["C", "A", "B"] });
+  assert.deepEqual(drive.files.get(saved.id)?.parents, ["songs"], "new saves must continue using the existing AudioStrike Playlists folder");
   assert.deepEqual((await drive.library.load(saved.id)).tracks.map(track => track.id), ["C", "A", "B"]);
   assert.deepEqual(await drive.library.playlists(), [saved]);
   await assert.rejects(() => drive.library.save("test.json", ["A"]), /already exists/);
@@ -130,6 +131,7 @@ test("owner upload requires signed cookie; invalid login, forged cookie and cros
     const login = await fetch(`${base}/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: process.env.AUDIOSTRIKE_OWNER_PASSWORD }) });
     assert.equal(login.status, 200);
     const cookie = login.headers.get("set-cookie")!;
+    assert.match(cookie, /^audiostrike_owner=/, "owner sessions must keep the established cookie name");
     assert.match(cookie, /HttpOnly/i); assert.match(cookie, /SameSite=Strict/i);
     const uploaded = await upload(cookie);
     assert.equal(uploaded.status, 201);
