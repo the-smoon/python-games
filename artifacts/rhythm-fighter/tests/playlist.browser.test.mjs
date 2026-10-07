@@ -67,6 +67,7 @@ test('Drive picker recovery, shared save/load, ordering, one-time shuffle, odd w
       if (mode === 'single') assert.equal(await page.getByTestId('button-analyze').isDisabled(), true);
       await page.getByTestId('button-add-A').click();
       await page.getByTestId('button-remove-A').waitFor();
+      assert.equal(await page.getByTestId('input-random-clips').isChecked(), false);
       if (mode !== 'single') {
         await page.getByRole('button', { name: 'Move A up', exact: true }).click();
         await page.getByRole('button', { name: 'Move A up', exact: true }).click();
@@ -84,7 +85,10 @@ test('Drive picker recovery, shared save/load, ordering, one-time shuffle, odd w
       await page.getByTestId('select-saved-playlist').selectOption('saved-0');
       await page.getByTestId('button-load-playlist').click();
       await page.waitForFunction(() => document.querySelector('[data-testid=playlist-status]')?.textContent.includes('Loaded'));
-      if (mode === 'random') await page.getByTestId('input-shuffle-playlist').check();
+      if (mode === 'random') {
+        await page.getByTestId('input-shuffle-playlist').check();
+        await page.getByTestId('input-random-clips').check();
+      }
       await page.getByTestId('button-analyze').click();
       await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
       const snap = () => page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot());

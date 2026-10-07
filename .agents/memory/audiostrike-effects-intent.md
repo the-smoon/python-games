@@ -15,8 +15,8 @@ Regular deaths use luminous radial square pixels. Boss deaths additionally shed 
 
 **How to apply:** Bound recursive debris and particle growth. Treat Nox as a visual inspiration, not a verified exact death-effect recipe; available research supports glow, transparency, particles, and shrapnel, not every detail of the requested recipe.
 
-Boss blast/debuff zones must visibly charge and brighten for five seconds before applying their effects. Dead owners must not leave pending hostile zones.
+Boss blast circles should detonate after a short warning that only says “LEAVE.” While active, they pull nearby ships toward the center and reduce movement speed; the circle count rises with boss level. Dead owners must not leave pending hostile zones.
 
-**Why:** The user requested five-second brightening circles; the warning is meant to let players move out before detonation.
+**Why:** The user asked for faster AoE, minimal escape-only messaging, a black-hole pull, and more circles at higher levels.
 
-**How to apply:** Keep zone positions fixed at cast time, show the remaining charge, and retain owner-specific cleanup when bosses stack or die.
+**How to apply:** Keep each cast’s zone positions fixed, use a brief warning with no extra countdown or helpful blurb, and retain owner-specific cleanup when bosses stack or die.

@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSongDesign, songSpawnIdentity } from '../src/songDesign.ts';
+import { createSongDesign, songSpawnIdentity, songSectionAtTime } from '../src/songDesign.ts';
 import { generateForm } from '../src/encounterRules.ts';
 import { FrameCombatSimulation } from '../src/combatSimulation.ts';
 import { pixelBurst, bossDeathBurst, advanceCombatEffects } from '../src/combatEffects.ts';
-import { disruptEnemies, castBossAbility, advanceBlasts, BLAST_CHARGE_SECONDS } from '../src/bossAbilities.ts';
+import { disruptEnemies, castBossAbility, advanceBlasts, blastMovementField, BLAST_CHARGE_SECONDS } from '../src/bossAbilities.ts';
 import { fireWeapon, newWeaponState, pickDrop, WEAPON_BALANCE } from '../src/weaponRules.ts';
+import { createPlaybackWindow, playbackTimeForElapsed, setPlaybackWindow } from '../src/playbackClips.ts';
 
 const signal = { rms: .5, onset: .3, low: .8, mid: .2, high: .05, centroid: .15, flatness: .1, pulse: true, tempo: 120 };
 const features = (key, s = signal) => ({ duration: 80, analyzedSeconds: 80, analyzed: true, signature: s, motifs: Array(8).fill(s), songKey: key });
@@ -25,6 +26,57 @@ test('song blueprints are stable and contrasting songs create different clean sh
   assert.equal(shapes.size, 5);
   assert.ok(createSongDesign(bright).shapes.includes('ELBOW'));
   assert.notEqual(generateForm(signal, 1).widthScale, generateForm({ ...signal, low: .05, high: .9 }, 1).widthScale);
+});
+
+test('full-song motifs produce per-section enemy designs and follow playback position', () => {
+  const song = features('changing-song');
+  song.duration = 80;
+  song.analyzedSeconds = 80;
+  song.motifs = [
+    signal,
+    { ...signal, low: .04, mid: .12, high: .88, centroid: .9, flatness: .58 },
+    { ...signal, low: .18, mid: .79, high: .03, centroid: .35, flatness: .18 },
+    { ...signal, low: .56, mid: .32, high: .12, centroid: .18, flatness: .8 },
+    { ...signal, low: .09, mid: .39, high: .52, centroid: .74, flatness: .72 },
+    { ...signal, low: .91, mid: .04, high: .05, centroid: .12, flatness: .08 },
+    { ...signal, low: .15, mid: .26, high: .59, centroid: .81, flatness: .31 },
+    { ...signal, low: .35, mid: .58, high: .07, centroid: .4, flatness: .93 },
+  ];
+  const design = createSongDesign(song);
+  song.design = design;
+  assert.equal(songSectionAtTime(song, 0, 80), 0);
+  assert.equal(songSectionAtTime(song, 70, 80), 7);
+  assert.ok(new Set(design.sections.map((section) => section.color)).size > 1);
+  assert.ok(new Set(design.sections.map((section) => section.projectile)).size >= 3);
+  assert.notDeepEqual(songSpawnIdentity(song, song.motifs[0], 1, 0), songSpawnIdentity(song, song.motifs[5], 1, 5));
+});
+
+test('random playback clips keep the first track at zero and wrap elapsed time inside later 30-second windows', () => {
+  assert.equal(createPlaybackWindow(80, false, false), null);
+  let randomCalls = 0;
+  const first = createPlaybackWindow(80, true, true, () => { randomCalls += 1; return .8; });
+  assert.deepEqual(first, { startSeconds: 0, endSeconds: 30 });
+  assert.equal(randomCalls, 0);
+  const later = createPlaybackWindow(80, true, false, () => .5);
+  assert.deepEqual(later, { startSeconds: 25, endSeconds: 55 });
+  assert.equal(playbackTimeForElapsed(35, 80, later), 30);
+  assert.deepEqual(createPlaybackWindow(12, true, false, () => .75), { startSeconds: 0, endSeconds: 12 });
+});
+
+test('audio playback loops back to its selected clip start instead of the beginning of the file', () => {
+  const events = {};
+  const audio = {
+    readyState: 1,
+    currentTime: 0,
+    addEventListener(name, listener) { events[name] = listener; },
+  };
+  setPlaybackWindow(audio, { startSeconds: 25, endSeconds: 55 });
+  assert.equal(audio.currentTime, 25);
+  audio.currentTime = 55;
+  events.timeupdate();
+  assert.equal(audio.currentTime, 25);
+  setPlaybackWindow(audio, null);
+  assert.equal(audio.currentTime, 0);
 });
 
 test('pixel bursts radiate in all directions and boss debris splits into bounded generations', () => {
@@ -56,14 +108,14 @@ test('boss death briefly stuns, then gives exactly five seconds of slow wanderin
   assert.equal(simulation.moveEnemy(e, w.player, signal, 1, 15.45), 1);
 });
 
-test('boss secondary zones wait five seconds, detonate once, and buffs expire rather than stack', () => {
-  const w = world(), boss = { id: 1, features: features('bass'), secondaryAt: 0, secondaryIndex: 0 };
+test('boss blast zones charge quickly, grow with level, and buffs expire rather than stack', () => {
+  const w = world(), boss = { id: 1, originLevel: 5, features: features('bass'), secondaryAt: 0, secondaryIndex: 0 };
   assert.equal(castBossAbility(w, boss, signal, 10), 'BLAST');
-  assert.ok(w.blasts.length >= 1);
-  assert.ok(w.blasts.every(b => b.explodeAt - b.createdAt === BLAST_CHARGE_SECONDS));
-  assert.equal(advanceBlasts(w, 14.99).length, 0);
-  assert.ok(advanceBlasts(w, 15).length >= 1);
-  assert.equal(advanceBlasts(w, 15.1).length, 0);
+  assert.equal(w.blasts.length, 3, 'level five casts three simultaneous circles');
+  assert.ok(w.blasts.every(b => Math.abs(b.explodeAt - b.createdAt - BLAST_CHARGE_SECONDS) < 1e-9));
+  assert.equal(advanceBlasts(w, 10 + BLAST_CHARGE_SECONDS - .01).length, 0);
+  assert.equal(advanceBlasts(w, 10 + BLAST_CHARGE_SECONDS).length, 3);
+  assert.equal(advanceBlasts(w, 10 + BLAST_CHARGE_SECONDS + .1).length, 0);
   boss.secondaryAt = 15; boss.secondaryIndex = 1;
   assert.equal(castBossAbility(w, boss, signal, 16), 'DEBUFF');
   assert.equal(w.blasts.at(-1).kind, 'DEBUFF');
@@ -73,8 +125,34 @@ test('boss secondary zones wait five seconds, detonate once, and buffs expire ra
   assert.equal(simulation.moveEnemy(w.enemies[0], w.player, signal, 1, 18), 1.35);
   assert.equal(simulation.moveEnemy(w.enemies[0], w.player, signal, 1, 22), 1);
   boss.secondaryAt = 22;
+  boss.abilitySerial = 2;
   assert.equal(castBossAbility(w, boss, { ...signal, low: .02, high: .9, mid: .05 }, 23), 'DEBUFF',
     'surviving boss secondary attacks follow the currently audible song, not its origin song');
+});
+
+test('active blast circles pull the ship inward and slow movement until detonation', () => {
+  const blast = { x: 250, y: 500, radius: 82, createdAt: 2, explodeAt: 3, ownerId: 1, kind: 'BLAST', detonated: false };
+  const field = blastMovementField([blast], 209, 500, 2.5);
+  assert.ok(field.speedScale < 1 && field.speedScale > .45);
+  assert.ok(field.pullX > 0, 'the field pushes an offset ship toward the circle center');
+  assert.equal(blastMovementField([blast], 100, 500, 2.5).speedScale, 1);
+  assert.equal(blastMovementField([blast], 209, 500, 3).speedScale, 1, 'the field ends at detonation');
+  const highLevel = world();
+  assert.equal(castBossAbility(highLevel, { id: 2, originLevel: 11, features: features('high'), secondaryAt: 0, secondaryIndex: 0 }, signal, 0), 'BLAST');
+  assert.equal(highLevel.blasts.length, 6, 'the highest tested level adds more circles than level five');
+});
+
+test('automatic boss attacks use blast zones more often than alternate abilities', () => {
+  const w = world();
+  const boss = { id: 3, originLevel: 1, features: features('frequent-blasts'), secondaryAt: 0 };
+  const casts = [];
+  for (let i = 0; i < 6; i += 1) {
+    const now = boss.secondaryAt;
+    casts.push(castBossAbility(w, boss, signal, now));
+    advanceBlasts(w, now + BLAST_CHARGE_SECONDS + .5);
+  }
+  assert.equal(casts.filter(kind => kind === 'BLAST').length, 4);
+  assert.equal(casts.filter(kind => kind !== 'BLAST').length, 2);
 });
 
 test('Rank 5 weapons have comparable boss damage with different strengths; companions are stronger and durable', () => {

@@ -140,6 +140,7 @@ function moveEnemy(
 }
 
 export type CombatInput = Readonly<{ x: number; y: number; active: boolean }>;
+export type PlayerField = Readonly<{ speedScale?: number; pullX?: number; pullY?: number }>;
 export type ArenaBounds = Readonly<{
   width: number;
   height: number;
@@ -151,7 +152,7 @@ export type ArenaBounds = Readonly<{
 }>;
 
 export interface CombatSimulation {
-  movePlayer(player: PlayerEntity, input: CombatInput, delta: number, bossEncounter: boolean, now?: number): void;
+  movePlayer(player: PlayerEntity, input: CombatInput, delta: number, bossEncounter: boolean, now?: number, field?: PlayerField): void;
   moveBoss(boss: ActiveBoss, player: Pick<PlayerEntity, 'x' | 'y'>, live: LiveFeatures, delta: number): void;
   moveEnemy(
     enemy: EnemyEntity, player: Pick<PlayerEntity, 'x' | 'y'>, live: LiveFeatures,
@@ -165,7 +166,7 @@ export class FrameCombatSimulation implements CombatSimulation {
   private readonly bounds: ArenaBounds;
   constructor(bounds: ArenaBounds) { this.bounds = bounds; }
 
-  movePlayer(player: PlayerEntity, input: CombatInput, delta: number, bossEncounter: boolean, now = 0) {
+  movePlayer(player: PlayerEntity, input: CombatInput, delta: number, bossEncounter: boolean, now = 0, field: PlayerField = {}) {
     const { width, height, maxSpeed, acceleration, deceleration } = this.bounds;
     let x = input.x;
     let y = input.y;
@@ -177,7 +178,8 @@ export class FrameCombatSimulation implements CombatSimulation {
       x = 0;
       y = 0;
     }
-    const speedScale = (player.debuffUntil ?? 0) > now ? .65 : 1;
+    const speedScale = ((player.debuffUntil ?? 0) > now ? .65 : 1) *
+      Math.max(.4, Math.min(1, Number.isFinite(field.speedScale) ? field.speedScale! : 1));
     const targetVx = x * maxSpeed * speedScale;
     const targetVy = y * maxSpeed * speedScale;
     const changeX = targetVx - player.vx;
@@ -191,6 +193,8 @@ export class FrameCombatSimulation implements CombatSimulation {
       player.vx += changeX / distance * velocityStep;
       player.vy += changeY / distance * velocityStep;
     }
+    player.vx += (Number.isFinite(field.pullX) ? field.pullX! : 0) * delta;
+    player.vy += (Number.isFinite(field.pullY) ? field.pullY! : 0) * delta;
     const minX = 22;
     const maxX = width - 22;
     const minY = 90;

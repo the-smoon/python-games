@@ -36,9 +36,10 @@ async function downloadTrack(id: string, title: string, used: number, signal: Ab
   return { id, title, file: new File([blob], `${title}.mp3`, { type: 'audio/mpeg' }) };
 }
 
-function Setup({ tracks, onTracks, random, onRandom, onBusy }: {
+function Setup({ tracks, onTracks, random, onRandom, randomClips, onRandomClips, onBusy }: {
   tracks: LocalTrack[]; onTracks: (tracks: LocalTrack[]) => void;
   random: boolean; onRandom: (value: boolean) => void; onBusy: (value: boolean) => void;
+  randomClips: boolean; onRandomClips: (value: boolean) => void;
 }) {
   const qc = useQueryClient();
   const library = useGetMusicLibrary();
@@ -192,6 +193,12 @@ function Setup({ tracks, onTracks, random, onRandom, onBusy }: {
           <input type="checkbox" data-testid="input-shuffle-playlist" checked={random} disabled={busy} onChange={(e) => onRandom(e.target.checked)} />
           Random order - shuffle once when starting
         </label>
+        <label className="mt-3 flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" data-testid="input-random-clips" checked={randomClips} disabled={busy}
+            onChange={(e) => onRandomClips(e.target.checked)} />
+          Random 30-second clips after the first song
+        </label>
+        <p className="mt-2 text-xs text-slate-500">The first song starts at the beginning. Enemy designs still use each full-song analysis.</p>
         <p className="mt-3 text-xs text-slate-400">Adjacent tracks become stage/boss pairs. The end wraps to the first track, including odd-length lists. One track plays both roles. Replay keeps the same order.</p>
         <label className={`${label} mt-4`} htmlFor="playlist-name">Playlist name</label>
         <div className="mt-2 flex gap-2">

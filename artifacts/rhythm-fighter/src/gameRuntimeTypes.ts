@@ -57,6 +57,7 @@ export type EnemyEntity = {
   motion: MotionPattern; designMotion: MotionPattern | 'HUNT'; motionChangedAt: number;
   pattern: AttackPattern; subBoss: boolean; ownerId?: number; originLevel?: number; frozenUntil?: number;
   color?: string; designProjectile?: ProjectileKind;
+  designSignal?: LiveFeatures; musicSection?: number;
   stunnedUntil?: number; confusedUntil?: number; buffUntil?: number;
 };
 export type BulletEntity = PlayerShot;
@@ -77,6 +78,7 @@ export type BossEntity = {
   form: FormProfile; parts: number; phase: BossPhase; frame: number; phaseFrame: number;
   vx: number; fireTimer: number; dyingTimer: number; subBossTimer: number; revision: number; frozenUntil?: number;
   color?: string; designProjectile?: ProjectileKind; secondaryAt?: number; secondaryIndex?: number;
+  designSignal?: LiveFeatures; musicSection?: number; abilitySerial?: number;
 };
 export type ActiveBoss = BossEntity & {
   id: number;

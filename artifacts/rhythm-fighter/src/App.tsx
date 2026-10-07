@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Crosshair, Gamepad2, Headphones, Pause, Play, RotateCcw, Volume2, Zap } from 'lucide-react';
 import { submitRunScore, type RunScoreInput } from '@workspace/api-client-react';
-import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, encounterSignature, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
+import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
 import { audioIntensity, blendAudioSignals, bossHealth, chooseAttack, chooseMotion, generateForm, spawnProfile } from './encounterRules';
 import { advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, enemyDropChance, fireWeapon, freezeSplash, laserHitsTarget, newWeaponState, pickDrop, slowScale, tickFrozenBullet, WEAPON_BALANCE, type PickupType } from './weaponRules';
@@ -18,9 +18,10 @@ import { blankLiveFeatures, createReactiveTrack, readReactiveTrack, releaseBossA
 import { chooseBehavior, chooseProjectile, createEnemyProjectile, firePattern } from './combatSimulation';
 import { shapePath, drawEnemyBody, drawBossBody } from './enemyVisuals';
 import { pixelBurst, bossDeathBurst, advanceCombatEffects, drawCombatEffects } from './combatEffects';
-import { disruptEnemies, castBossAbility, advanceBlasts, drawBossAbilities } from './bossAbilities';
-import { createSongDesign, songSpawnIdentity } from './songDesign';
+import { disruptEnemies, castBossAbility, advanceBlasts, drawBossAbilities, blastMovementField } from './bossAbilities';
+import { createSongDesign, songSpawnIdentity, songSectionAtTime } from './songDesign';
 import { prepareSong } from './songAnalysisCache';
+import { createPlaybackWindow, playbackTimeForElapsed, playbackWindowFor, seekToPlaybackStart, setPlaybackWindow } from './playbackClips';
 const PLAYER_MAX_HEALTH = 100;
 const PLAYER_MAX_SPEED = 6.875;
 const PLAYER_ACCELERATION = .42;
@@ -45,7 +46,7 @@ async function inspectAudio(file: File, progress: (value: number) => void): Prom
     progress(70);
     const analysis = analyzeMusic(Array.from({ length: decoded.numberOfChannels }, (_, channel) => decoded.getChannelData(channel)), decoded.sampleRate);
     progress(100);
-    return { duration: clamp(decoded.duration || 42, 18, 180), ...analysis, analyzed: true };
+    return { duration: clamp(decoded.duration || 42, 18, 720), ...analysis, analyzed: true };
   } catch {
     // Keep playback available for files the browser cannot decode for pre-analysis.
     const url = URL.createObjectURL(file);
@@ -58,7 +59,7 @@ async function inspectAudio(file: File, progress: (value: number) => void): Prom
     });
     URL.revokeObjectURL(url);
     const fallback = analyzeMusic([new Float32Array(512)], 22050);
-    return { duration: clamp(duration || 42, 18, 180), ...fallback, analyzed: false };
+    return { duration: clamp(duration || 42, 18, 720), ...fallback, analyzed: false };
   } finally {
     if (decoder && decoder.state !== 'closed') await decoder.close().catch(() => undefined);
   }
@@ -248,8 +249,9 @@ function Home() {
   }, []);
   const [playlistTracks, setPlaylistTracks] = useState<LocalTrack[]>([]);
   const [randomOrder, setRandomOrder] = useState(false);
+  const [randomClips, setRandomClips] = useState(false);
   const [playlistBusy, setPlaylistBusy] = useState(false);
-  const preparedRef = useRef<(LocalTrack & { url: string; features: FeatureSet })[]>([]);
+  const preparedRef = useRef<(LocalTrack & { url: string; features: FeatureSet; playbackWindow: ReturnType<typeof createPlaybackWindow> })[]>([]);
   const [stageProgress, setStageProgress] = useState(0);
   const [bossProgress, setBossProgress] = useState(0);
   const [analysisMessage, setAnalysisMessage] = useState('Waiting for stage track');
@@ -306,7 +308,8 @@ function Home() {
     if (stageAudioRef.current && bossAudioRef.current) {
       if (stageAudioRef.current.src !== pair.stage.url) stageAudioRef.current.src = pair.stage.url;
       if (bossAudioRef.current.src !== pair.boss.url) bossAudioRef.current.src = pair.boss.url;
-      stageAudioRef.current.currentTime = 0; bossAudioRef.current.currentTime = 0;
+      setPlaybackWindow(stageAudioRef.current, pair.stage.playbackWindow);
+      setPlaybackWindow(bossAudioRef.current, pair.boss.playbackWindow);
     }
     game.stageFeatures = { ...pair.stage.features, design: createSongDesign(pair.stage.features) };
     game.bossFeatures = { ...pair.boss.features, design: createSongDesign(pair.boss.features) };
@@ -386,7 +389,15 @@ function Home() {
           setAnalysisProgress(Math.round((index + value / 100) / ordered.length * 100));
         });
         if (prepared.warning) setMusicWarning(prepared.warning);
-        preparedRef.current.push({ ...track, features: prepared.features, url: URL.createObjectURL(track.file) });
+        const url = URL.createObjectURL(track.file);
+        const duration = randomClips && prepared.features.analyzedSeconds > 0
+          ? prepared.features.analyzedSeconds : prepared.features.duration;
+        preparedRef.current.push({
+          ...track,
+          features: { ...prepared.features, duration },
+          url,
+          playbackWindow: createPlaybackWindow(duration, randomClips, index === 0),
+        });
       }
       if (preparedRef.current.some((track) => !track.features.analyzed)) {
         setMusicWarning('A track could not be pre-analyzed. Live audio will still guide combat where available.');
@@ -417,10 +428,15 @@ function Home() {
       setMusicWarning(error instanceof Error ? error.message : 'Track preparation failed. Try again.');
       syncState('UPLOAD');
     }
-  }, [resetAudio, syncState, playlistTracks, playlistBusy, randomOrder, loadLevelTracks]);
+  }, [resetAudio, syncState, playlistTracks, playlistBusy, randomOrder, randomClips, loadLevelTracks]);
 
-  const beginCountdown = useCallback(() => {
+  const beginCountdown = useCallback((rerollPlaybackClips = false) => {
     const game = gameRef.current;
+    if (rerollPlaybackClips && randomClips) {
+      preparedRef.current.forEach((track, index) => {
+        track.playbackWindow = createPlaybackWindow(track.features.duration, true, index === 0);
+      });
+    }
     for (const boss of encountersRef.current.bosses) releaseBossAudio(boss);
     encountersRef.current.reset();
     soundtrackRef.current.clear();
@@ -450,14 +466,14 @@ function Home() {
     bossAudioRef.current?.pause();
     if (stageAudioRef.current) {
       stageAudioRef.current.pause();
-      stageAudioRef.current.currentTime = 0;
+      seekToPlaybackStart(stageAudioRef.current);
       stageAudioRef.current.volume = 0;
       // Start from the replay button's user gesture, then seek back at the end of the countdown.
       resumeAudio();
       playTrack(stageAudioRef.current, 'Stage track');
     }
     syncState('COUNTDOWN');
-  }, [playTrack, resumeAudio, syncState, loadLevelTracks]);
+  }, [playTrack, resumeAudio, syncState, loadLevelTracks, randomClips]);
 
   useEffect(() => {
     const updateControllerStatus = () => {
@@ -512,7 +528,7 @@ function Home() {
       syncState('PLAYING');
       resetReactiveTrack(game.stageReactive);
       if (stageAudioRef.current) {
-        stageAudioRef.current.currentTime = 0;
+        seekToPlaybackStart(stageAudioRef.current);
         stageAudioRef.current.volume = .72;
         resumeAudio();
         playTrack(stageAudioRef.current, 'Stage track');
@@ -537,20 +553,20 @@ function Home() {
       runProgressRef.current.levelReached = Math.max(runProgressRef.current.levelReached, game.level);
       runProgressRef.current.bossLevelReached = Math.max(runProgressRef.current.bossLevelReached ?? 0, game.level);
       game.player.y = clamp(game.player.y, 90, H - 150);
-      const structure = features.signature;
+      const musicSection = songSectionAtTime(features, bossAudioRef.current?.currentTime ?? 0, bossAudioRef.current?.duration);
+      const section = features.design?.sections[musicSection] ?? createSongDesign(features).sections[musicSection];
+      const structure = section.signal;
       const reactiveSignature = game.bossReactive?.signature ?? live;
-      const style = encounterSignature(structure);
-      const blueprint = features.design ?? createSongDesign(features);
-      const shape = blueprint.core;
+      const shape = section.shape;
       const formSignal = blendAudioSignals(structure, reactiveSignature, .32);
       const id = encountersRef.current.createBossId();
       const boss: ActiveBoss = {
         id, originLevel: game.level, features, audio: bossAudioRef.current, reactive: game.bossReactive,
         x: W / 2, y: -35, radius: 55, health: hp, maxHealth: hp, shape, designShape: shape,
-        projectile: blueprint.projectile, designProjectile: blueprint.projectile, color: blueprint.colors[0],
-        pattern: chooseAttack(live, game.level), secondaryAt: gameNow() / 1000 + 6,
-        motion: chooseMotion(blendAudioSignals(structure, live, .4), game.level, shape, style.motion),
-        designMotion: style.motion, motionChangedAt: gameNow() / 1000,
+        projectile: section.projectile, designProjectile: section.projectile, color: section.color,
+        pattern: chooseAttack(blendAudioSignals(structure, live, .4), game.level), secondaryAt: gameNow() / 1000 + 6,
+        motion: chooseMotion(blendAudioSignals(structure, live, .4), game.level, shape, section.motion),
+        designMotion: section.motion, designSignal: structure, musicSection, motionChangedAt: gameNow() / 1000,
         form: generateForm(formSignal, game.level * 37),
         parts: 2 + Math.min(2, Math.floor(game.level / 3)), phase: 'INTRO',
         frame: 0, phaseFrame: 0, vx: 1, fireTimer: 0, dyingTimer: 0, subBossTimer: 0, revision: 0,
@@ -570,10 +586,9 @@ function Home() {
       boss.parts = Math.max(0, boss.parts - 1);
       const level = boss.originLevel;
       const serial = game.spawnIndex++ + level * 29;
-      const motifs = boss.features.motifs;
-      const motif = motifs.length ? motifs[Math.abs(serial) % motifs.length] : boss.features.signature;
-      const identity = encounterSignature(motif);
-      const spawnIdentity = songSpawnIdentity(boss.features, motif, serial);
+      const musicSection = songSectionAtTime(boss.features, boss.audio?.currentTime ?? 0, boss.audio?.duration);
+      const motif = boss.features.motifs[musicSection] ?? boss.features.signature;
+      const spawnIdentity = songSpawnIdentity(boss.features, motif, serial, musicSection);
       const shape = spawnIdentity.shape;
       const design = blendAudioSignals(motif, boss.reactive?.signature ?? live, .4);
       const radius = 22 + live.low * 8;
@@ -586,8 +601,10 @@ function Home() {
         diving: false, dvx: 0, dvy: 0, shape,
         projectile: spawnIdentity.projectile, designProjectile: spawnIdentity.projectile, color: spawnIdentity.color,
         form: generateForm(design, serial, 1.1),
-        motion: chooseMotion(blendAudioSignals(motif, live, .4), serial, shape, identity.motion),
-        designMotion: identity.motion, motionChangedAt: gameNow() / 1000, pattern: chooseAttack(live, serial),
+        motion: chooseMotion(blendAudioSignals(motif, live, .4), serial, shape, spawnIdentity.motion),
+        designMotion: spawnIdentity.motion, designSignal: spawnIdentity.signal, musicSection,
+        motionChangedAt: gameNow() / 1000,
+        pattern: chooseAttack(blendAudioSignals(spawnIdentity.signal, live, .4), serial),
         subBoss: true, ownerId: boss.id, originLevel: level, exiting: false, alive: true,
       });
     };
@@ -682,7 +699,7 @@ function Home() {
       game.spawnCooldown = 0;
       resetReactiveTrack(game.stageReactive);
       if (stageAudioRef.current) {
-        stageAudioRef.current.currentTime = 0;
+        seekToPlaybackStart(stageAudioRef.current);
         stageAudioRef.current.volume = .72;
       }
       game.songStart = gameNow();
@@ -765,7 +782,7 @@ function Home() {
       }
       combatSimulationRef.current.movePlayer(player, {
         x: joystick.dx, y: joystick.dy, active: isSteering,
-      }, delta, game.state === 'BOSS', now);
+      }, delta, game.state === 'BOSS', now, blastMovementField(game.blasts, player.x, player.y, now));
       player.invincible = Math.max(0, player.invincible - delta);
       finishEncounter();
       const volley = fireWeapon(arsenal.weapon, player, now);
@@ -799,7 +816,6 @@ function Home() {
         const pressure = spawnProfile(live, game.level, progress);
         const regularEnemyCount = () => game.enemies.filter((enemy) => !enemy.subBoss).length;
         if (game.state === 'PLAYING' && (game.spawnCooldown <= 0 || (live.pulse && game.spawnCooldown <= 10)) && regularEnemyCount() < pressure.maxEnemies) {
-          const behavior = chooseBehavior(live);
           const count = pressure.count;
           const spawnSerial = game.spawnIndex;
           game.spawnIndex += count;
@@ -807,26 +823,31 @@ function Home() {
             const serial = spawnSerial + enemyIndex + game.level * 17;
             const variation = (Math.sin(serial * 2.17 + live.centroid * 8) + 1) / 2;
             const radius = clamp(9 + live.low * 17 + variation * 10 + live.high * 5, 9, 42);
-            const x = behavior === 'FORMATION' ? (W / (count + 1)) * (enemyIndex + 1) : random(radius + 18, W - radius - 18);
             const health = clamp(1 + Math.round(live.low * 3 + progress * 3 + (game.level - 1) * 1.2), 1, 22);
-            const motifs = game.stageFeatures?.motifs ?? [];
-            const motif = motifs.length ? motifs[Math.abs(serial) % motifs.length] : game.stageFeatures?.signature ?? live;
-            const identity = encounterSignature(motif);
+            const features = game.stageFeatures ?? fallbackFeatures(30);
+            const musicSection = songSectionAtTime(features, stageAudioRef.current?.currentTime ?? songTime,
+              stageAudioRef.current?.duration);
+            const motif = features.motifs[musicSection] ?? features.signature ?? live;
             const design = blendAudioSignals(motif, game.stageReactive?.signature ?? live, .4);
-            const spawnIdentity = songSpawnIdentity(game.stageFeatures ?? fallbackFeatures(30), motif, serial);
+            const spawnIdentity = songSpawnIdentity(features, motif, serial, musicSection);
             const shape = spawnIdentity.shape;
             const projectile = spawnIdentity.projectile;
-            const motion = chooseMotion(blendAudioSignals(motif, live, .4), serial, shape, identity.motion);
-            const pattern = chooseAttack(live, serial);
+            const designSignal = spawnIdentity.signal;
+            const behavior = chooseBehavior(blendAudioSignals(designSignal, live, .4));
+            const x = behavior === 'FORMATION' ? (W / (count + 1)) * (enemyIndex + 1) : random(radius + 18, W - radius - 18);
+            const motion = chooseMotion(blendAudioSignals(designSignal, live, .4), serial, shape, spawnIdentity.motion);
+            const pattern = chooseAttack(blendAudioSignals(designSignal, live, .4), serial);
             game.enemies.push({
               x, y: -radius - 12, radius, health, maxHealth: health,
               speed: (2.4 + live.high * 6.2 + progress * 2.4) * pressure.speedScale,
-              behavior, fireRate: clamp((112 - live.mid * 42) / pressure.fireScale, 28, 140),
+              behavior,
+              fireRate: clamp((112 - live.mid * 42) / pressure.fireScale, 28, 140),
               fireTimer: randomInt(20, 80), frame: 0, zigDir: Math.random() > .5 ? 1 : -1,
               formX: x, formY: -radius - 12, diving: false, dvx: 0, dvy: 0, shape, projectile,
               designProjectile: projectile, color: spawnIdentity.color,
-              form: generateForm(design, serial, .8), motion, designMotion: identity.motion,
-              motionChangedAt: gameNow() / 1000, pattern, subBoss: false, exiting: false, alive: true,
+              form: generateForm(design, serial, .8), motion, designMotion: spawnIdentity.motion,
+              designSignal, musicSection, motionChangedAt: gameNow() / 1000, pattern,
+              subBoss: false, exiting: false, alive: true,
             });
           }
           game.spawnCooldown = pressure.cooldown;
@@ -850,18 +871,32 @@ function Home() {
             releaseBossAudio(boss);
           }
         } else {
+          const musicSection = songSectionAtTime(boss.features, boss.audio?.currentTime ?? 0, boss.audio?.duration);
+          if (musicSection !== boss.musicSection) {
+            const section = (boss.features.design ?? createSongDesign(boss.features)).sections[musicSection];
+            if (section) {
+              boss.musicSection = musicSection;
+              boss.designSignal = section.signal;
+              boss.shape = section.shape;
+              boss.designShape = section.shape;
+              boss.color = section.color;
+              boss.designProjectile = section.projectile;
+              boss.designMotion = section.motion;
+              boss.form = generateForm(blendAudioSignals(section.signal, live, .32), boss.revision + level * 37);
+              const sectionSignal = blendAudioSignals(section.signal, live, .4);
+              boss.motion = chooseMotion(sectionSignal, boss.revision + level * 37, section.shape, section.motion);
+              boss.pattern = chooseAttack(sectionSignal, boss.revision + level * 37);
+              boss.motionChangedAt = now;
+            }
+          }
           const nextPhase = bossPhase(boss.health, boss.maxHealth);
           if (boss.phase !== nextPhase) {
             boss.phase = nextPhase;
             boss.phaseFrame = 0;
             boss.revision += 1;
             boss.vx = boss.x > W / 2 ? -1 : 1;
-            const motifs = boss.features.motifs;
-            if (motifs.length) {
-              const motif = motifs[Math.abs(boss.revision) % motifs.length];
-              const identity = encounterSignature(motif);
-              boss.designMotion = identity.motion;
-            }
+            boss.pattern = chooseAttack(blendAudioSignals(boss.designSignal ?? boss.features.signature, live, .4),
+              boss.revision + level * 37);
             spawnSubBoss(live, boss);
           }
           const bossDelta = delta * slowScale(boss, now);
@@ -872,14 +907,15 @@ function Home() {
           }
           if (boss.phaseFrame < delta * 2) {
             const serial = boss.revision + level * 37;
-            const motifs = boss.features.motifs;
-            const motif = motifs.length ? motifs[Math.abs(serial) % motifs.length] : boss.features.signature;
-            boss.motion = chooseMotion(live, serial, boss.shape, boss.designMotion);
-            boss.pattern = chooseAttack(live, serial);
+            const sectionSignal = blendAudioSignals(boss.designSignal ?? boss.features.signature, live, .4);
+            boss.motion = chooseMotion(sectionSignal, serial, boss.shape, boss.designMotion);
+            boss.pattern = chooseAttack(sectionSignal, serial);
           }
           if (live.pulse && now - boss.motionChangedAt > .22) {
-            boss.motion = chooseMotion(live, boss.revision + Math.floor(boss.phaseFrame),
-              boss.shape, boss.designMotion);
+            const sectionSignal = blendAudioSignals(boss.designSignal ?? boss.features.signature, live, .4);
+            const serial = boss.revision + Math.floor(boss.phaseFrame);
+            boss.motion = chooseMotion(sectionSignal, serial, boss.shape, boss.designMotion);
+            boss.pattern = chooseAttack(sectionSignal, serial);
             boss.motionChangedAt = now;
           }
           boss.projectile = boss.designProjectile ?? chooseProjectile(live, 'BOSS');
@@ -890,11 +926,7 @@ function Home() {
             boss.subBossTimer = clamp(680 - audioIntensity(live) * 350 - level * 15, 240, 680);
           }
           combatSimulationRef.current.moveBoss(boss, player, live, bossDelta);
-          const ability = castBossAbility(game, boss, live, now);
-          if (ability) {
-            arsenal.message = ability === 'BUFF' ? 'Boss overdrive · enemies empowered for 5s' : ability === 'DEBUFF' ? 'Disruption field charging · leave the violet circle' : 'Blast zones charging · leave the orange circles';
-            arsenal.messageUntil = now + 3;
-          }
+          castBossAbility(game, boss, live, now);
           boss.fireTimer -= bossDelta * (1 + audioIntensity(live) * .45);
           if (boss.fireTimer <= 0) {
             firePattern(game.enemyBullets, boss.x, boss.y + boss.radius * .3, player, boss.pattern, boss.projectile, 7.4 + Math.min(2, level * .18), boss.pattern === 'TRACK' ? 8 : 4, game.frame, boss.id);
@@ -909,11 +941,15 @@ function Home() {
         if (!canAttack()) break;
         if (!enemy.alive) continue;
         const confused = (enemy.confusedUntil ?? 0) > now;
-        enemy.behavior = chooseBehavior(live);
-        enemy.pattern = confused ? (['TRACK', 'WAVE', 'SPIRAL'] as const)[Math.abs(Math.floor(enemy.frame / 18 + enemy.formX)) % 3] : chooseAttack(live, Math.floor(enemy.frame));
+        const designSignal = enemy.designSignal ?? live;
+        const combatSignal = blendAudioSignals(designSignal, live, .4);
+        enemy.behavior = chooseBehavior(combatSignal);
+        enemy.pattern = confused
+          ? (['TRACK', 'WAVE', 'SPIRAL'] as const)[Math.abs(Math.floor(enemy.frame / 18 + enemy.formX)) % 3]
+          : chooseAttack(combatSignal, Math.floor(enemy.frame));
         enemy.projectile = enemy.designProjectile ?? chooseProjectile(live, enemy.behavior);
         if (live.pulse && now - enemy.motionChangedAt > .22 && !enemy.exiting) {
-          const nextMotion = chooseMotion(live, Math.floor(enemy.frame + game.spawnIndex),
+          const nextMotion = chooseMotion(combatSignal, Math.floor(enemy.frame + game.spawnIndex),
             enemy.shape, enemy.designMotion);
           if (nextMotion !== enemy.motion) {
             enemy.motion = nextMotion;
@@ -1191,7 +1227,8 @@ function Home() {
     const audio = owner?.audio ?? stageAudioRef.current;
     if (!audio) return;
     if (!bossTrack && game.state === 'PLAYING' && Number.isFinite(audio.duration) && audio.duration > 0) {
-      audio.currentTime = Math.min(audio.duration - .01, ((gameNow() - game.songStart) / 1000) % audio.duration);
+      audio.currentTime = playbackTimeForElapsed((gameNow() - game.songStart) / 1000,
+        audio.duration, playbackWindowFor(audio));
     }
     audio.volume = game.state === 'COUNTDOWN' ? 0 : .72;
     resumeAudio();
@@ -1239,7 +1276,8 @@ function Home() {
               </div>
             ) : (
               <>
-                <PlaylistSetup tracks={playlistTracks} onTracks={setPlaylistTracks} random={randomOrder} onRandom={setRandomOrder} onBusy={setPlaylistBusy} />
+                <PlaylistSetup tracks={playlistTracks} onTracks={setPlaylistTracks} random={randomOrder} onRandom={setRandomOrder}
+                  randomClips={randomClips} onRandomClips={setRandomClips} onBusy={setPlaylistBusy} />
                 <button onClick={startAnalysis} disabled={!canStart} className="action-button mt-5 flex w-full items-center justify-center gap-3 rounded-xl border border-cyan-300/50 bg-cyan-300/10 py-4 font-mono text-xs font-bold uppercase tracking-[.2em] text-cyan-200 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/50 disabled:text-slate-600" data-testid="button-analyze"><Crosshair className="h-4 w-4" /> Analyze and play</button>
                 {musicWarning && <p role="alert" className="mt-3 text-sm text-amber-200">{musicWarning}</p>}
             <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-slate-600"><Volume2 className="h-3 w-3" /> Shared Drive MP3 library</div>
@@ -1310,7 +1348,7 @@ function Home() {
                     className="action-button inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200 disabled:cursor-not-allowed disabled:opacity-50"
                     data-testid="button-save-run-score"
                   >{scoreSaveState === 'saving' ? 'Saving…' : scoreSaveState === 'error' ? 'Retry saving score' : 'Save run score'}</button>}
-                  <button type="button" onClick={beginCountdown} className="action-button inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-game-over"><RotateCcw className="h-3.5 w-3.5" /> Replay mission</button>
+                  <button type="button" onClick={() => beginCountdown(true)} className="action-button inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-game-over"><RotateCcw className="h-3.5 w-3.5" /> Replay mission</button>
                 </div>
               </form>
             </div></div>}

@@ -132,6 +132,7 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         enemies: game.enemies.map((enemy) => ({
           x: enemy.x, y: enemy.y, health: enemy.health, shape: enemy.shape,
           motion: enemy.motion, pattern: enemy.pattern, projectile: enemy.projectile, subBoss: enemy.subBoss,
+          designSignal: enemy.designSignal,
           ownerId: enemy.ownerId, frame: enemy.frame, speed: enemy.speed,
           frozenUntil: enemy.frozenUntil, fireTimer: enemy.fireTimer, alive: enemy.alive,
           exiting: enemy.exiting, fireRate: enemy.fireRate,

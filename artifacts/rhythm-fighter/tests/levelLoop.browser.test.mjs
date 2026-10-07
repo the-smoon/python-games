@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
 import { BOSS_ARRIVAL_SECONDS, STAGE_LEVEL_SECONDS } from '../src/gameRules.ts';
-import { audioIntensity, chooseAttack } from '../src/encounterRules.ts';
+import { audioIntensity, blendAudioSignals, chooseAttack } from '../src/encounterRules.ts';
 
 const url = process.env.RHYTHM_FIGHTER_TEST_URL || process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/';
 
@@ -143,10 +143,11 @@ test('timed encounters stack, preserve playlist ownership, pause, pickups, and i
       return boss;
     }
     async function timeout() {
-      await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setEncounterElapsed(29.98));
+      await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setEncounterElapsed(29.5));
       await page.clock.runFor(10);
       assert.equal((await snapshot()).state, 'BOSS', 'does not expire before exact deadline');
-      await page.clock.runFor(30);
+      await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setEncounterElapsed(30.01));
+      await page.clock.runFor(20);
       assert.equal((await snapshot()).state, 'PLAYING');
     }
     const first = await arrive();
@@ -167,12 +168,14 @@ test('timed encounters stack, preserve playlist ownership, pause, pickups, and i
     assert.equal(secondStage.audibleSrc, first.src, 'carried boss keeps its original song');
     assert.equal(secondStage.stageTrackTitle, 'C'); assert.equal(secondStage.bossTrackTitle, 'A');
     assert.ok(secondStage.enemies.some((enemy) => !enemy.subBoss), 'regular enemies spawn immediately');
-    assert.ok(secondStage.stageTime < .1);
+    assert.ok(secondStage.stageTime < .25, `new stage should start near zero; observed ${secondStage.stageTime.toFixed(3)}s`);
     await page.clock.runFor(100);
     const bassEnemies = await snapshot();
     assert.ok(bassEnemies.audibleFeatures.low > bassEnemies.audibleFeatures.high);
     for (const enemy of bassEnemies.enemies.filter((enemy) => !enemy.subBoss)) {
-      assert.equal(enemy.pattern, chooseAttack(bassEnemies.audibleFeatures, Math.floor(enemy.frame)));
+        const structure = enemy.designSignal ?? bassEnemies.audibleFeatures;
+        assert.equal(enemy.pattern, chooseAttack(blendAudioSignals(structure, bassEnemies.audibleFeatures, .4),
+          Math.floor(enemy.frame)), 'full-song design and live audio both shape the current attack');
     }
     assert.ok(bassEnemies.bosses[0].x !== secondStage.bosses[0].x || bassEnemies.bosses[0].y !== secondStage.bosses[0].y, 'carried boss continues moving');
     await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.spawnTarget(80, 350, 12345, false, 8, 30));

@@ -14,3 +14,9 @@ If the cache is unavailable, explicitly warn the player and use a fresh analysis
 **Why:** Cached data is an optimization, not a reason to prevent playable audio, but silent cache failures hide a broken durable-analysis feature.
 
 **How to apply:** Keep request deadlines, validation, and read/write quotas around public cache access, and keep its failure messages separate from successful playback.
+
+Use the cached full-song `analyzedSeconds` when choosing a random playback window; do not reread media metadata as a separate pre-match step.
+
+**Why:** The user wants enemy design and clip selection to come from the full-song analysis prepared before gameplay, without an extra media load delaying or blocking playlist startup.
+
+**How to apply:** Carry the stored duration with each prepared track and choose each non-first clip window before starting the countdown; keep the first track anchored at zero.
