@@ -109,6 +109,13 @@ test('touch and keyboard pause preserve stage, crossfade, boss, and weapon timin
     assert.ok(Math.abs(bossResumed.bossAudioTime - bossPaused.bossAudioTime) < .25, 'boss track resumes without seeking or restarting');
     await page.clock.runFor(100);
     assert.notEqual((await snapshot()).bossY, bossPaused.bossY, 'boss moves after resume');
+
+    await page.getByTestId('button-pause').tap();
+    await page.getByTestId('button-return-main-menu').tap();
+    await page.getByTestId('panel-upload').waitFor();
+    assert.equal((await snapshot()).state, 'UPLOAD');
+    assert.equal((await snapshot()).paused, false);
+    assert.equal(await page.locator('[data-testid="playlist-tracks"] li').count(), 2, 'returning to the menu keeps the selected playlist');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

@@ -106,6 +106,10 @@ test('game over allows replay without saving and retains a bounded callsign for 
       bossLevelReached: null,
     });
     assert.equal(await page.getByTestId('button-save-run-score').count(), 0, 'a saved run cannot be submitted again from the UI');
+    await page.getByTestId('button-return-main-menu').click();
+    await page.getByTestId('panel-upload').waitFor();
+    assert.equal((await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot())).state, 'UPLOAD');
+    assert.equal(await page.locator('[data-testid="playlist-tracks"] li').count(), 2, 'main menu keeps the selected playlist after game over');
     assert.deepEqual(errors, [], `browser errors: ${errors.join(', ')}`);
   } finally {
     await browser.close();

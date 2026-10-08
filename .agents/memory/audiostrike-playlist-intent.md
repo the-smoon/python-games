@@ -14,3 +14,9 @@ Pair the playlist continuously across its boundary, rather than padding or disca
 **Why:** The agreed playlist behavior maps adjacent songs to stage/boss roles and loops; retaining the odd last song avoids losing user-selected music.
 
 **How to apply:** An A/B/C list produces A/B, C/A, B/C, then repeats. A single song supplies both roles.
+
+Returning from gameplay to the menu ends the current run but keeps the selected playlist, its order and playback options, and in-session song analyses.
+
+**Why:** Players should be able to adjust or restart without reloading music or repeating analysis; only the run itself is abandoned.
+
+**How to apply:** Stop and release runtime audio resources and reset combat state, but preserve playlist selection and analysis caches until the app session ends.

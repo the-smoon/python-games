@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Crosshair, Gamepad2, Headphones, Pause, Play, RotateCcw, Volume2, Zap } from 'lucide-react';
+import { Crosshair, Gamepad2, Headphones, House, Pause, Play, RotateCcw, Volume2, Zap } from 'lucide-react';
 import { submitRunScore, type RunScoreInput } from '@workspace/api-client-react';
 import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
@@ -522,6 +522,68 @@ function Home() {
     }
     syncState('COUNTDOWN');
   }, [playTrack, resumeAudio, syncState, loadLevelTracks, randomClips]);
+
+  const returnToMainMenu = useCallback(() => {
+    const pointerId = joystickRef.current.pointerId;
+    joystickRef.current = neutralJoystick();
+    if (pointerId !== null && canvasRef.current?.hasPointerCapture(pointerId)) {
+      canvasRef.current.releasePointerCapture(pointerId);
+    }
+    pauseRef.current = { since: null, total: 0, tracks: [] };
+    setPaused(false);
+    resetAudio();
+
+    const game = gameRef.current;
+    game.level = 1;
+    game.stageFeatures = null;
+    game.bossFeatures = null;
+    game.player = { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 };
+    game.enemies = [];
+    game.bullets = [];
+    game.enemyBullets = [];
+    game.bossBeams = [];
+    game.particles = [];
+    game.debris = [];
+    game.blasts = [];
+    game.shockwaves = [];
+    game.boss = null;
+    game.score = 0;
+    game.frame = 0;
+    game.songStart = 0;
+    game.bossStart = 0;
+    game.beatIndex = 0;
+    game.spawnIndex = 0;
+    game.spawnCooldown = 0;
+    game.stageDone = false;
+    game.bossArrivalAt = 0;
+    game.introTimer = 0;
+    game.countdown = 3;
+    game.countdownTimer = 0;
+    game.currentBehavior = 'SCANNING';
+
+    arsenalRef.current = {
+      weapon: newWeaponState(), drops: [], beam: null, splashes: [],
+      bombUntil: 0, message: '', messageUntil: 0, dropMisses: 0,
+    };
+    activeRunIdRef.current = null;
+    finalRunRef.current = null;
+    runProgressRef.current = { levelReached: 1, bossLevelReached: null };
+    setFinalRun(null);
+    setScoreName('');
+    setScoreSaveState('idle');
+    setBossHud([]);
+    setBossSecondsLeft(30);
+    setCombatHud({ weapon: newWeaponState(), now: 0, message: '', messageUntil: 0 });
+    setHud({ level: 1, score: 0, health: PLAYER_MAX_HEALTH, behavior: 'SCANNING', phase: '', bossHealth: 0, bossMaxHealth: 1, stageSecondsLeft: STAGE_LEVEL_SECONDS });
+    setCountdown(3);
+    setStageProgress(0);
+    setBossProgress(0);
+    setAnalysisMessage('Waiting for stage track');
+    setAnalysisProgress(0);
+    setAudioError('');
+    setMusicWarning('');
+    syncState('UPLOAD');
+  }, [resetAudio, syncState]);
 
   useEffect(() => {
     const updateControllerStatus = () => {
@@ -1413,8 +1475,24 @@ function Home() {
             </div>
             {musicWarning && <p className="mx-auto mb-3 max-w-md rounded border border-amber-400/30 bg-amber-950/30 px-3 py-2 text-center text-xs text-amber-200" role="status" data-testid="text-music-warning">{musicWarning}</p>}
             {audioError && !paused && <div className="audio-alert" role="alert"><span>{audioError}</span><button type="button" onClick={retryAudio} className="rounded border border-orange-300 px-2 py-1 font-bold text-orange-200">Retry audio</button></div>}
-            {state === 'COUNTDOWN' && <div className="state-overlay" data-testid="overlay-countdown"><div><p className="font-mono text-[10px] uppercase tracking-[.28em] text-cyan-300">Get ready</p><div className="mt-2 text-8xl font-extrabold text-cyan-200" data-testid="text-countdown">{countdown}</div><p className="mt-1 font-mono text-[10px] uppercase tracking-[.18em] text-slate-500">Touch, left stick, or D-pad · weapons auto-fire</p></div></div>}
-            {paused && <div className="state-overlay" data-testid="overlay-paused" role="dialog" aria-modal="true" aria-labelledby="pause-title"><div className="overlay-card"><h2 id="pause-title" className="text-4xl font-extrabold tracking-[.08em] text-cyan-200">PAUSED</h2><p className="mt-3 text-slate-300">Combat, timer, and music are paused.</p><button type="button" autoFocus onClick={togglePause} className="action-button mt-6 inline-flex items-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-xs font-bold uppercase text-cyan-200" data-testid="button-resume"><Play className="h-4 w-4" aria-hidden="true" /> Resume game</button><p className="mt-3 font-mono text-[10px] text-slate-400">Esc or P to resume</p></div></div>}
+            {state === 'COUNTDOWN' && <div className="state-overlay" data-testid="overlay-countdown"><div>
+              <p className="font-mono text-[10px] uppercase tracking-[.28em] text-cyan-300">Get ready</p>
+              <div className="mt-2 text-8xl font-extrabold text-cyan-200" data-testid="text-countdown">{countdown}</div>
+              <p className="mt-1 font-mono text-[10px] uppercase tracking-[.18em] text-slate-500">Touch, left stick, or D-pad · weapons auto-fire</p>
+              <button type="button" onClick={returnToMainMenu} className="action-button mt-5 inline-flex items-center gap-2 rounded-lg border border-slate-600 bg-slate-950/80 px-5 py-3 font-mono text-xs font-bold uppercase text-slate-300" data-testid="button-return-main-menu"><House className="h-4 w-4" aria-hidden="true" /> Main menu</button>
+            </div></div>}
+            {paused && <div className="state-overlay" data-testid="overlay-paused" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+              <div className="overlay-card">
+                <h2 id="pause-title" className="text-4xl font-extrabold tracking-[.08em] text-cyan-200">PAUSED</h2>
+                <p className="mt-3 text-slate-300">Combat, timer, and music are paused.</p>
+                <div className="mt-6 flex flex-col justify-center gap-2 sm:flex-row">
+                  <button type="button" autoFocus onClick={togglePause} className="action-button inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-xs font-bold uppercase text-cyan-200" data-testid="button-resume"><Play className="h-4 w-4" aria-hidden="true" /> Resume game</button>
+                  <button type="button" onClick={returnToMainMenu} className="action-button inline-flex items-center justify-center gap-2 rounded-lg border border-slate-600 bg-slate-950/80 px-5 py-3 font-mono text-xs font-bold uppercase text-slate-300" data-testid="button-return-main-menu"><House className="h-4 w-4" aria-hidden="true" /> Main menu</button>
+                </div>
+                <p className="mt-3 font-mono text-[10px] text-slate-500">Leaving ends this run; its score will not be saved.</p>
+                <p className="mt-2 font-mono text-[10px] text-slate-400">Esc or P to resume</p>
+              </div>
+            </div>}
             {state === 'BOSS_INTRO' && <div className="pointer-events-none absolute inset-x-0 top-[17%] text-center" data-testid="overlay-boss-intro"><p className="font-mono text-xs font-bold uppercase tracking-[.24em] text-orange-300">Stage {hud.level} complete · incoming boss</p></div>}
             {state === 'GAME_OVER' && finalRun && <div className="state-overlay" data-testid="overlay-game-over"><div className="overlay-card">
               <p className="font-mono text-[10px] uppercase tracking-[.28em] text-red-300">Flight terminated</p>
@@ -1449,6 +1527,7 @@ function Home() {
                     data-testid="button-save-run-score"
                   >{scoreSaveState === 'saving' ? 'Saving…' : scoreSaveState === 'error' ? 'Retry saving score' : 'Save run score'}</button>}
                   <button type="button" onClick={() => beginCountdown(true)} className="action-button inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-300/50 bg-cyan-300/10 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-cyan-200" data-testid="button-replay-game-over"><RotateCcw className="h-3.5 w-3.5" /> Replay mission</button>
+                  <button type="button" onClick={returnToMainMenu} className="action-button inline-flex items-center justify-center gap-2 rounded-lg border border-slate-600 bg-slate-950/80 px-5 py-3 font-mono text-[10px] font-bold uppercase tracking-[.18em] text-slate-300" data-testid="button-return-main-menu"><House className="h-3.5 w-3.5" aria-hidden="true" /> Main menu</button>
                 </div>
               </form>
             </div></div>}
