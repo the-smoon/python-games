@@ -20,7 +20,7 @@ export type FeatureSet = {
 };
 export type LiveFeatures = AudioFingerprint;
 export type EnemyShape = ShapeIdentity;
-export type ProjectileKind = 'ORB' | 'BOLT' | 'SHARD' | 'RING';
+export type ProjectileKind = 'ORB' | 'BOLT' | 'SHARD' | 'RING' | 'SEEKER';
 export type BossPhase = 'INTRO' | 'PHASE1' | 'PHASE2' | 'PHASE3' | 'DYING';
 
 export type AudioReactiveTrack = {
@@ -64,6 +64,7 @@ export type BulletEntity = PlayerShot;
 export type EnemyBulletEntity = {
   x: number; y: number; vx: number; vy: number; damage: number; alive: boolean;
   kind?: ProjectileKind; radius: number; spin?: number; frozenUntil?: number; ownerId?: number;
+  seekSecondsLeft?: number;
 };
 export type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; pixel?: boolean; size?: number };
 export type DebrisEntity = {
@@ -93,6 +94,19 @@ export type DelayedBlast = {
   kind: 'BLAST' | 'DEBUFF'; detonated: boolean;
 };
 export type Shockwave = { x: number; y: number; color: string; startedAt: number; until: number };
+export type BossSweepBeam = {
+  ownerId: number;
+  createdAt: number;
+  activeAt: number;
+  endsAt: number;
+  startY: number;
+  endY: number;
+  safeStartX: number;
+  safeDirection: -1 | 1;
+  safeSpeed: number;
+  safeWidth: number;
+  thickness: number;
+};
 export type CombatArsenal = {
   weapon: ReturnType<typeof import('./weaponRules').newWeaponState>;
   drops: Pickup[];
@@ -115,6 +129,7 @@ export type CombatWorld = {
   enemies: EnemyEntity[];
   bullets: BulletEntity[];
   enemyBullets: EnemyBulletEntity[];
+  bossBeams: BossSweepBeam[];
   particles: ParticleEntity[];
   debris: DebrisEntity[];
   blasts: DelayedBlast[];

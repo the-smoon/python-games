@@ -22,21 +22,55 @@ export function chooseEnemyShape(features: LiveFeatures, serial: number, musical
 }
 
 export function chooseProjectile(features: LiveFeatures, behavior: Behavior | 'BOSS'): ProjectileKind {
+  if (features.onset > .66 && features.centroid > .52) return 'SEEKER';
   if (features.high > .68 && features.centroid > .5) return 'SHARD';
   if (features.low > .68 && (behavior === 'TANK' || behavior === 'BOSS')) return 'RING';
   if (features.mid > .5) return 'BOLT';
   return 'ORB';
 }
 
+export const SEEKER_STEERING_SECONDS = .72;
+export const SEEKER_TURN_RATE_RADIANS_PER_SECOND = 2.35;
+
 export function createEnemyProjectile(
   x: number, y: number, vx: number, vy: number, damage: number, kind: ProjectileKind,
 ): EnemyBulletEntity {
-  const speedScale: Record<ProjectileKind, number> = { ORB: 1, BOLT: 1.12, SHARD: 1.28, RING: .78 };
-  const radius: Record<ProjectileKind, number> = { ORB: 4, BOLT: 3, SHARD: 4, RING: 6 };
+  const speedScale: Record<ProjectileKind, number> = { ORB: 1, BOLT: 1.12, SHARD: 1.28, RING: .78, SEEKER: .82 };
+  const radius: Record<ProjectileKind, number> = { ORB: 4, BOLT: 3, SHARD: 4, RING: 6, SEEKER: 5 };
   return {
     x, y, vx: vx * speedScale[kind], vy: vy * speedScale[kind], damage,
     alive: true, kind, radius: radius[kind], spin: Math.atan2(vy, vx),
+    seekSecondsLeft: kind === 'SEEKER' ? SEEKER_STEERING_SECONDS : undefined,
   };
+}
+
+/** Steer seeker shots toward the current player briefly, then leave their paths fixed. */
+export function advanceSeekerProjectiles(
+  bullets: EnemyBulletEntity[],
+  target: Pick<PlayerEntity, 'x' | 'y'>,
+  delta: number,
+) {
+  if (!Number.isFinite(delta) || delta <= 0) return;
+  for (const bullet of bullets) {
+    const remaining = bullet.seekSecondsLeft ?? 0;
+    if (!bullet.alive || bullet.kind !== 'SEEKER' || bullet.frozenUntil || remaining <= 0) continue;
+    const speed = Math.hypot(bullet.vx, bullet.vy);
+    if (!Number.isFinite(speed) || speed < .001 ||
+      ![bullet.x, bullet.y, target.x, target.y].every(Number.isFinite)) {
+      bullet.seekSecondsLeft = 0;
+      continue;
+    }
+    const stepSeconds = Math.min(delta / 60, remaining);
+    const currentAngle = Math.atan2(bullet.vy, bullet.vx);
+    const targetAngle = Math.atan2(target.y - bullet.y, target.x - bullet.x);
+    const difference = Math.atan2(Math.sin(targetAngle - currentAngle), Math.cos(targetAngle - currentAngle));
+    const maxTurn = SEEKER_TURN_RATE_RADIANS_PER_SECOND * stepSeconds;
+    const nextAngle = currentAngle + clamp(difference, -maxTurn, maxTurn);
+    bullet.vx = Math.cos(nextAngle) * speed;
+    bullet.vy = Math.sin(nextAngle) * speed;
+    bullet.spin = nextAngle;
+    bullet.seekSecondsLeft = Math.max(0, remaining - delta / 60);
+  }
 }
 
 export function firePattern(

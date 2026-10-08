@@ -29,6 +29,14 @@ const ROSTERS: ShapeIdentity[][] = [
   ['RECTANGLE', 'SQUARE', 'ELBOW', 'TRIANGLE', 'RING'],
 ];
 
+function projectileForSection(signal: AudioSignals): ProjectileKind {
+  if (signal.onset > .66 && signal.centroid > .52) return 'SEEKER';
+  if (signal.high > .6) return 'SHARD';
+  if (signal.low > .65) return 'RING';
+  if (signal.mid > .45) return 'BOLT';
+  return 'ORB';
+}
+
 /** A stable song blueprint, prepared at the song boundary; live audio never replaces its silhouette/palette. */
 export function createSongDesign(features: FeatureSet): SongDesign {
   const s = features.signature;
@@ -51,7 +59,7 @@ export function createSongDesign(features: FeatureSet): SongDesign {
       signal,
       shape,
       color: `hsl(${sectionHue} 88% ${60 + index % 4 * 3}%)`,
-      projectile: signal.high > .6 ? 'SHARD' : signal.low > .65 ? 'RING' : signal.mid > .45 ? 'BOLT' : 'ORB',
+      projectile: projectileForSection(signal),
       motion: chooseMotion(signal, seed + index, shape),
       attack: chooseAttack(signal, seed + index),
     };
@@ -59,7 +67,7 @@ export function createSongDesign(features: FeatureSet): SongDesign {
   return {
     seed, shapes, core: shapes[0], wings: shapes[2],
     colors: Array.from({ length: 4 }, (_, i) => `hsl(${(hue + i * 22) % 360} 88% ${60 + i * 3}%)`),
-    projectile: s.high > .6 ? 'SHARD' : s.low > .65 ? 'RING' : s.mid > .45 ? 'BOLT' : 'ORB',
+    projectile: projectileForSection(s),
     attack: chooseAttack(s, seed),
     sections,
   };

@@ -1,10 +1,15 @@
-import type { ActiveBoss, CombatWorld, DelayedBlast, LiveFeatures } from './gameRuntimeTypes';
+import {
+  ARENA_HEIGHT, ARENA_WIDTH,
+  type ActiveBoss, type BossSweepBeam, type CombatWorld, type DelayedBlast, type LiveFeatures,
+} from './gameRuntimeTypes';
 import { audioIntensity } from './encounterRules.ts';
 
 export const BOSS_DEATH_STUN_SECONDS = .45;
 export const BOSS_DEATH_CONFUSION_SECONDS = 5;
 export const BLAST_CHARGE_SECONDS = .9;
 const DEBUFF_CHARGE_SECONDS = 2.6;
+export const BOSS_SWEEP_TELEGRAPH_SECONDS = 1.05;
+export const BOSS_SWEEP_DURATION_SECONDS = 2.7;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 export function disruptEnemies(world: Pick<CombatWorld, 'enemies'>, now: number) {
@@ -23,13 +28,33 @@ export function castBossAbility(world: CombatWorld, boss: ActiveBoss, live: Live
   const signature = audioIntensity(live) > .015 ? live : boss.features.signature;
   const selected = signature.high > signature.mid * 1.2 ? 1 : 2;
   const automaticCount = boss.abilitySerial ?? 0;
-  const automaticKind = automaticCount % 3 < 2 ? 'BLAST' : (['DEBUFF', 'BUFF'] as const)[selected - 1];
-  const kind = (['BLAST', 'DEBUFF', 'BUFF'] as const)[boss.secondaryIndex ?? -1] ?? automaticKind;
+  const cycle = automaticCount % 4;
+  const automaticKind = cycle < 2 ? 'BLAST' : cycle === 2
+    ? (['DEBUFF', 'BUFF'] as const)[selected - 1] : 'SWEEP';
+  const kind = (['BLAST', 'DEBUFF', 'BUFF', 'SWEEP'] as const)[boss.secondaryIndex ?? -1] ?? automaticKind;
   if (boss.secondaryIndex === undefined) boss.abilitySerial = automaticCount + 1;
   boss.secondaryIndex = undefined;
   boss.secondaryAt = now + clamp(8 - live.tempo / 90 - live.onset * 2, 4.5, 8);
   if (kind === 'BUFF') {
     for (const enemy of world.enemies) if (enemy.alive) enemy.buffUntil = now + 5;
+  } else if (kind === 'SWEEP') {
+    world.bossBeams ??= [];
+    if (world.bossBeams.length < 1) {
+      const safeWidth = 128;
+      world.bossBeams.push({
+        ownerId: boss.id,
+        createdAt: now,
+        activeAt: now + BOSS_SWEEP_TELEGRAPH_SECONDS,
+        endsAt: now + BOSS_SWEEP_TELEGRAPH_SECONDS + BOSS_SWEEP_DURATION_SECONDS,
+        startY: clamp(boss.y + boss.radius + 55, 245, 330),
+        endY: ARENA_HEIGHT - 130,
+        safeStartX: clamp(world.player.x, safeWidth / 2 + 12, ARENA_WIDTH - safeWidth / 2 - 12),
+        safeDirection: live.high >= live.low ? 1 : -1,
+        safeSpeed: clamp(100 + live.tempo * .25 + live.onset * 35, 115, 190),
+        safeWidth,
+        thickness: 30,
+      });
+    }
   } else if (world.blasts.length < 8) {
     const level = boss.originLevel ?? world.level;
     const circleCount = kind === 'BLAST' ? Math.min(6, 1 + Math.floor(Math.max(0, level - 1) / 2)) : 1;
@@ -49,6 +74,48 @@ export function castBossAbility(world: CombatWorld, boss: ActiveBoss, live: Live
     }
   }
   return kind;
+}
+
+export function bossSweepPosition(beam: BossSweepBeam, now: number) {
+  const duration = Math.max(.01, beam.endsAt - beam.activeAt);
+  const progress = clamp((now - beam.activeAt) / duration, 0, 1);
+  const active = now >= beam.activeAt && now < beam.endsAt;
+  const y = now < beam.activeAt
+    ? beam.startY
+    : beam.startY + (beam.endY - beam.startY) * progress;
+  const minX = beam.safeWidth / 2 + 12;
+  const maxX = ARENA_WIDTH - minX;
+  const range = maxX - minX;
+  const raw = beam.safeStartX - minX +
+    beam.safeDirection * beam.safeSpeed * Math.max(0, Math.min(now, beam.endsAt) - beam.activeAt);
+  const cycle = Math.max(.01, range * 2);
+  const wrapped = ((raw % cycle) + cycle) % cycle;
+  const safeX = minX + (wrapped <= range ? wrapped : cycle - wrapped);
+  return { y, safeX, progress, active };
+}
+
+export function bossSweepHitsPlayer(
+  beam: BossSweepBeam,
+  player: Pick<CombatWorld['player'], 'x' | 'y'>,
+  now: number,
+  playerWidth: number,
+  playerHeight: number,
+) {
+  const position = bossSweepPosition(beam, now);
+  if (!position.active ||
+    Math.abs(player.y - position.y) > beam.thickness / 2 + playerHeight / 2) return false;
+  const safeHalfWidth = Math.max(0, beam.safeWidth / 2 - playerWidth / 2);
+  return Math.abs(player.x - position.safeX) > safeHalfWidth;
+}
+
+/** End expired sweeps and immediately remove hazards from bosses that are gone or dying. */
+export function advanceBossSweepBeams(
+  world: Pick<CombatWorld, 'bossBeams'>,
+  bosses: readonly Pick<ActiveBoss, 'id' | 'phase'>[],
+  now: number,
+) {
+  const activeOwners = new Set(bosses.filter((boss) => boss.phase !== 'DYING').map((boss) => boss.id));
+  world.bossBeams = world.bossBeams.filter((beam) => beam.endsAt > now && activeOwners.has(beam.ownerId));
 }
 
 export function blastMovementField(blasts: readonly DelayedBlast[], x: number, y: number, now: number) {
@@ -87,6 +154,32 @@ export function advanceBlasts(world: Pick<CombatWorld, 'blasts'>, now: number): 
 
 export function drawBossAbilities(ctx: CanvasRenderingContext2D, world: CombatWorld, now: number) {
   ctx.save();
+  for (const beam of world.bossBeams) {
+    const { y, safeX, active } = bossSweepPosition(beam, now);
+    const left = safeX - beam.safeWidth / 2;
+    const right = safeX + beam.safeWidth / 2;
+    if (active) {
+      ctx.fillStyle = 'rgba(255, 45, 91, .72)';
+      ctx.fillRect(0, y - beam.thickness / 2, Math.max(0, left), beam.thickness);
+      ctx.fillRect(right, y - beam.thickness / 2, Math.max(0, ARENA_WIDTH - right), beam.thickness);
+      ctx.fillStyle = 'rgba(255, 225, 232, .95)';
+      ctx.fillRect(0, y - 2, Math.max(0, left), 4);
+      ctx.fillRect(right, y - 2, Math.max(0, ARENA_WIDTH - right), 4);
+      ctx.fillStyle = 'rgba(0, 229, 255, .1)';
+      ctx.fillRect(left, y - beam.thickness / 2 - 6, beam.safeWidth, beam.thickness + 12);
+    } else {
+      ctx.setLineDash([9, 7]);
+      ctx.strokeStyle = 'rgba(255, 100, 132, .78)';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(ARENA_WIDTH, y); ctx.stroke();
+      ctx.fillStyle = 'rgba(0, 229, 255, .13)';
+      ctx.fillRect(left, y - beam.thickness / 2 - 8, beam.safeWidth, beam.thickness + 16);
+    }
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(90, 248, 255, .95)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(left, y - beam.thickness / 2 - 6, beam.safeWidth, beam.thickness + 12);
+  }
   for (const b of world.blasts) {
     const chargeTime = Math.max(.1, b.explodeAt - b.createdAt);
     const t = clamp((now - b.createdAt) / chargeTime, 0, 1);
