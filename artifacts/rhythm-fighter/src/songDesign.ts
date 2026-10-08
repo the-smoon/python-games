@@ -1,6 +1,6 @@
 import type { FeatureSet, ProjectileKind } from './gameRuntimeTypes';
-import type { ShapeIdentity, AudioSignals, AttackPattern, MotionPattern } from './encounterRules';
-import { chooseAttack, chooseMotion } from './encounterRules.ts';
+import type { ShapeIdentity, AudioSignals, AttackPattern, MotionPattern, FormProfile } from './encounterRules';
+import { chooseAttack, chooseMotion, generateForm } from './encounterRules.ts';
 
 export type SongSectionDesign = {
   signal: AudioSignals;
@@ -20,6 +20,11 @@ export type SongDesign = {
   projectile: ProjectileKind;
   attack: AttackPattern;
   sections: SongSectionDesign[];
+};
+
+export type SongDesignPreview = {
+  enemy: { shape: ShapeIdentity; color: string; form: FormProfile; projectile: ProjectileKind };
+  boss: { shape: ShapeIdentity; color: string; form: FormProfile; wings: ShapeIdentity; accentColor: string; projectile: ProjectileKind };
 };
 
 const ROSTERS: ShapeIdentity[][] = [
@@ -100,5 +105,28 @@ export function songSpawnIdentity(
     attack: section.attack,
     signal: section.signal,
     sectionIndex: index,
+  };
+}
+
+/** Select representative opening-section forms without attaching or changing a design on the analysis. */
+export function createSongDesignPreview(features: FeatureSet): SongDesignPreview {
+  const design = features.design ?? createSongDesign(features);
+  const section = design.sections[0];
+  const enemy = songSpawnIdentity(features, section.signal, design.seed, 0);
+  return {
+    enemy: {
+      shape: enemy.shape,
+      color: enemy.color,
+      form: generateForm(section.signal, design.seed, .8),
+      projectile: enemy.projectile,
+    },
+    boss: {
+      shape: section.shape,
+      color: section.color,
+      form: generateForm(section.signal, design.seed, 1.1),
+      wings: design.wings,
+      accentColor: design.colors[2],
+      projectile: section.projectile,
+    },
   };
 }

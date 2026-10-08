@@ -9,7 +9,7 @@
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test tests/gameRules.test.mjs tests/gamepadControls.test.mjs tests/encounterRules.test.mjs tests/weaponRules.test.mjs tests/musicAnalysis.test.mjs tests/playlistRules.test.mjs tests/combatRework.test.mjs",
-    "test:browser": "node --test --test-concurrency=1 tests/gamepad.browser.test.mjs tests/levelLoop.browser.test.mjs tests/weapons.browser.test.mjs tests/pause.browser.test.mjs tests/playlist.browser.test.mjs tests/runScores.browser.test.mjs"
+    "test:browser": "node --test --test-concurrency=1 tests/gamepad.browser.test.mjs tests/levelLoop.browser.test.mjs tests/weapons.browser.test.mjs tests/pause.browser.test.mjs tests/playlist.browser.test.mjs tests/runScores.browser.test.mjs tests/songDesignPreview.browser.test.mjs"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

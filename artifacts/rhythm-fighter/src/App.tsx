@@ -21,6 +21,7 @@ import { pixelBurst, bossDeathBurst, advanceCombatEffects, drawCombatEffects } f
 import { disruptEnemies, castBossAbility, advanceBlasts, advanceBossSweepBeams, bossSweepHitsPlayer, drawBossAbilities, blastMovementField } from './bossAbilities';
 import { createSongDesign, songSpawnIdentity, songSectionAtTime } from './songDesign';
 import { prepareSong } from './songAnalysisCache';
+import type { SongPreviewState } from './SongDesignPreview';
 import { createPlaybackWindow, playbackTimeForElapsed, playbackWindowFor, seekToPlaybackStart, setPlaybackWindow } from './playbackClips';
 const PLAYER_MAX_HEALTH = 100;
 const PLAYER_MAX_SPEED = 6.875;
@@ -36,6 +37,13 @@ const COLORS: Record<string, string> = {
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const random = (min: number, max: number) => min + Math.random() * (max - min);
 const randomInt = (min: number, max: number) => Math.floor(random(min, max + 1));
+type PreparedSong = Awaited<ReturnType<typeof prepareSong>>;
+type SongPreparation = {
+  file: File;
+  promise: Promise<PreparedSong>;
+  progress: number;
+  observers: Set<(value: number) => void>;
+};
 
 async function inspectAudio(file: File, progress: (value: number) => void): Promise<FeatureSet> {
   progress(8);
@@ -258,10 +266,13 @@ function Home() {
     return (clock.since ?? performance.now()) - clock.total;
   }, []);
   const [playlistTracks, setPlaylistTracks] = useState<LocalTrack[]>([]);
+  const [previewTrackId, setPreviewTrackId] = useState<string | null>(null);
+  const [songPreview, setSongPreview] = useState<SongPreviewState>({ trackId: '', status: 'idle' });
   const [randomOrder, setRandomOrder] = useState(false);
   const [randomClips, setRandomClips] = useState(false);
   const [playlistBusy, setPlaylistBusy] = useState(false);
   const preparedRef = useRef<(LocalTrack & { url: string; features: FeatureSet; playbackWindow: ReturnType<typeof createPlaybackWindow> })[]>([]);
+  const preparedSongsRef = useRef(new Map<string, SongPreparation>());
   const [stageProgress, setStageProgress] = useState(0);
   const [bossProgress, setBossProgress] = useState(0);
   const [analysisMessage, setAnalysisMessage] = useState('Waiting for stage track');
@@ -301,6 +312,33 @@ function Home() {
     gameRef.current.audioContext = null;
     gameRef.current.stageReactive = null;
     gameRef.current.bossReactive = null;
+  }, []);
+
+  const prepareTrack = useCallback((track: LocalTrack, onProgress: (value: number) => void) => {
+    const cache = preparedSongsRef.current;
+    const existing = cache.get(track.id);
+    if (existing?.file === track.file) {
+      existing.observers.add(onProgress);
+      onProgress(existing.progress);
+      return existing.promise.finally(() => existing.observers.delete(onProgress));
+    }
+
+    const entry: SongPreparation = {
+      file: track.file,
+      progress: 0,
+      observers: new Set([onProgress]),
+      promise: Promise.resolve(null as unknown as PreparedSong),
+    };
+    const report = (value: number) => {
+      entry.progress = value;
+      for (const observer of entry.observers) observer(value);
+    };
+    entry.promise = prepareSong(track.file, inspectAudio, report).catch((error) => {
+      if (cache.get(track.id) === entry) cache.delete(track.id);
+      throw error;
+    });
+    cache.set(track.id, entry);
+    return entry.promise.finally(() => entry.observers.delete(onProgress));
   }, []);
 
   const loadLevelTracks = useCallback((level: number) => {
@@ -394,7 +432,7 @@ function Home() {
       for (let index = 0; index < ordered.length; index++) {
         const track = ordered[index];
         setAnalysisMessage(`Mapping track ${index + 1}/${ordered.length}: ${track.title}`);
-        const prepared = await prepareSong(track.file, inspectAudio, (value) => {
+        const prepared = await prepareTrack(track, (value) => {
           if (index % 2 === 0) setStageProgress(value); else setBossProgress(value);
           setAnalysisProgress(Math.round((index + value / 100) / ordered.length * 100));
         });
@@ -438,7 +476,7 @@ function Home() {
       setMusicWarning(error instanceof Error ? error.message : 'Track preparation failed. Try again.');
       syncState('UPLOAD');
     }
-  }, [resetAudio, syncState, playlistTracks, playlistBusy, randomOrder, randomClips, loadLevelTracks]);
+  }, [resetAudio, syncState, playlistTracks, playlistBusy, randomOrder, randomClips, loadLevelTracks, prepareTrack]);
 
   const beginCountdown = useCallback((rerollPlaybackClips = false) => {
     const game = gameRef.current;
@@ -1276,6 +1314,43 @@ function Home() {
       pendingScoreRunsRef.current.delete(run.runId);
     }
   }, [scoreName]);
+  const selectedPreviewTrack = playlistTracks.find((track) => track.id === previewTrackId) ?? playlistTracks[0] ?? null;
+  useEffect(() => {
+    const currentTracks = new Map(playlistTracks.map((track) => [track.id, track.file]));
+    for (const [id, preparation] of preparedSongsRef.current) {
+      if (currentTracks.get(id) !== preparation.file) preparedSongsRef.current.delete(id);
+    }
+  }, [playlistTracks]);
+  useEffect(() => {
+    if (!selectedPreviewTrack) {
+      setSongPreview({ trackId: '', status: 'idle' });
+      return;
+    }
+    let current = true;
+    const { id } = selectedPreviewTrack;
+    setSongPreview({ trackId: id, status: 'loading', progress: 0 });
+    void prepareTrack(selectedPreviewTrack, (progress) => {
+      if (current) setSongPreview((previous) => previous.trackId === id
+        ? { ...previous, status: 'loading', progress }
+        : previous);
+    }).then((prepared) => {
+      if (!current) return;
+      setSongPreview({
+        trackId: id,
+        status: prepared.features.analyzed ? 'ready' : 'unavailable',
+        features: prepared.features,
+        message: prepared.warning || undefined,
+      });
+    }).catch((error: unknown) => {
+      if (!current) return;
+      setSongPreview({
+        trackId: id,
+        status: 'error',
+        message: error instanceof Error ? error.message : 'The song analysis failed.',
+      });
+    });
+    return () => { current = false; };
+  }, [selectedPreviewTrack?.id, selectedPreviewTrack?.file, prepareTrack]);
   const canStart = !playlistBusy && playlistTracks.length > 0;
   const isGame = state === 'COUNTDOWN' || state === 'PLAYING' || state === 'BOSS_INTRO' || state === 'BOSS' || state === 'GAME_OVER';
 
@@ -1301,7 +1376,8 @@ function Home() {
             ) : (
               <>
                 <PlaylistSetup tracks={playlistTracks} onTracks={setPlaylistTracks} random={randomOrder} onRandom={setRandomOrder}
-                  randomClips={randomClips} onRandomClips={setRandomClips} onBusy={setPlaylistBusy} />
+                  randomClips={randomClips} onRandomClips={setRandomClips} onBusy={setPlaylistBusy}
+                  selectedTrackId={selectedPreviewTrack?.id ?? null} onSelectTrack={setPreviewTrackId} preview={songPreview} />
                 <button onClick={startAnalysis} disabled={!canStart} className="action-button mt-5 flex w-full items-center justify-center gap-3 rounded-xl border border-cyan-300/50 bg-cyan-300/10 py-4 font-mono text-xs font-bold uppercase tracking-[.2em] text-cyan-200 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/50 disabled:text-slate-600" data-testid="button-analyze"><Crosshair className="h-4 w-4" /> Analyze and play</button>
                 {musicWarning && <p role="alert" className="mt-3 text-sm text-amber-200">{musicWarning}</p>}
             <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-slate-600"><Volume2 className="h-3 w-3" /> Shared Drive MP3 library</div>

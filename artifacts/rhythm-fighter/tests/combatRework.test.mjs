@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSongDesign, songSpawnIdentity, songSectionAtTime } from '../src/songDesign.ts';
+import { createSongDesign, createSongDesignPreview, songSpawnIdentity, songSectionAtTime } from '../src/songDesign.ts';
 import { generateForm } from '../src/encounterRules.ts';
 import { advanceSeekerProjectiles, chooseProjectile, createEnemyProjectile, firePattern, FrameCombatSimulation } from '../src/combatSimulation.ts';
 import { pixelBurst, bossDeathBurst, advanceCombatEffects } from '../src/combatEffects.ts';
@@ -29,6 +29,18 @@ test('song blueprints are stable and contrasting songs create different clean sh
   assert.equal(shapes.size, 5);
   assert.ok(createSongDesign(bright).shapes.includes('ELBOW'));
   assert.notEqual(generateForm(signal, 1).widthScale, generateForm({ ...signal, low: .05, high: .9 }, 1).widthScale);
+});
+
+test('song style previews are deterministic representatives and leave the saved analysis unchanged', () => {
+  const bass = features('preview-bass'), bright = features('preview-bright', { ...signal, low: .05, high: .9, centroid: .8 });
+  const before = structuredClone(bass);
+  const bassPreview = createSongDesignPreview(bass);
+  assert.deepEqual(createSongDesignPreview(bass), bassPreview);
+  assert.notDeepEqual(createSongDesignPreview(bright), bassPreview);
+  assert.deepEqual(bass, before, 'preview generation does not attach or mutate analysis data');
+  assert.equal(bassPreview.enemy.projectile, createSongDesign(bass).sections[0].projectile);
+  assert.equal(bassPreview.boss.shape, createSongDesign(bass).sections[0].shape);
+  assert.equal(bassPreview.boss.wings, createSongDesign(bass).wings);
 });
 
 test('full-song motifs produce per-section enemy designs and follow playback position', () => {

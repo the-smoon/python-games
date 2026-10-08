@@ -6,6 +6,7 @@ import {
   useGetMusicLibrary, useGetOwnerStatus, useListSharedPlaylists,
 } from '@workspace/api-client-react';
 import { moveTrack, type LocalTrack } from './playlistRules';
+import SongDesignPreview, { type SongPreviewState } from './SongDesignPreview';
 
 const api = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/playlists`;
 const MAX_TRACK = 24 * 1024 * 1024;
@@ -36,10 +37,11 @@ async function downloadTrack(id: string, title: string, used: number, signal: Ab
   return { id, title, file: new File([blob], `${title}.mp3`, { type: 'audio/mpeg' }) };
 }
 
-function Setup({ tracks, onTracks, random, onRandom, randomClips, onRandomClips, onBusy }: {
+function Setup({ tracks, onTracks, random, onRandom, randomClips, onRandomClips, onBusy, selectedTrackId, onSelectTrack, preview }: {
   tracks: LocalTrack[]; onTracks: (tracks: LocalTrack[]) => void;
   random: boolean; onRandom: (value: boolean) => void; onBusy: (value: boolean) => void;
   randomClips: boolean; onRandomClips: (value: boolean) => void;
+  selectedTrackId: string | null; onSelectTrack: (id: string) => void; preview: SongPreviewState;
 }) {
   const qc = useQueryClient();
   const library = useGetMusicLibrary();
@@ -183,11 +185,15 @@ function Setup({ tracks, onTracks, random, onRandom, randomClips, onRandomClips,
       <ol className="mt-3 space-y-2" data-testid="playlist-tracks">
         {tracks.map((track, i) => <li key={track.id} className="flex items-center gap-2 rounded bg-slate-950/70 p-2 text-sm">
           <span className="text-slate-500">{i + 1}.</span><span className="min-w-0 flex-1 truncate text-slate-200">{track.title}</span>
+          <button type="button" className={`${button} ${selectedTrackId === track.id ? 'border-cyan-300 text-cyan-100' : ''}`}
+            aria-pressed={selectedTrackId === track.id} aria-label={`Preview ${track.title}`}
+            data-testid={`button-preview-${track.id}`} onClick={() => onSelectTrack(track.id)}>Preview</button>
           <button type="button" className={button} disabled={busy || i === 0} aria-label={`Move ${track.title} up`} onClick={() => onTracks(moveTrack(tracks, i, i - 1))}>Up</button>
           <button type="button" className={button} disabled={busy || i === tracks.length - 1} aria-label={`Move ${track.title} down`} onClick={() => onTracks(moveTrack(tracks, i, i + 1))}>Down</button>
           <button type="button" className={button} disabled={busy} aria-label={`Remove ${track.title}`} data-testid={`button-remove-${track.id}`} onClick={() => onTracks(tracks.filter((_, n) => n !== i))}>Remove</button>
         </li>)}
       </ol>
+      <SongDesignPreview track={tracks.find((track) => track.id === selectedTrackId) ?? tracks[0] ?? null} preview={preview} />
       {tracks.length > 0 && <>
         <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
           <input type="checkbox" data-testid="input-shuffle-playlist" checked={random} disabled={busy} onChange={(e) => onRandom(e.target.checked)} />
