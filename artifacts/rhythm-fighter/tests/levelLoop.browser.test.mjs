@@ -5,6 +5,7 @@ import test from 'node:test';
 import { chromium } from 'playwright-core';
 import { BOSS_ARRIVAL_SECONDS, STAGE_LEVEL_SECONDS } from '../src/gameRules.ts';
 import { audioIntensity, blendAudioSignals, chooseAttack } from '../src/encounterRules.ts';
+import { BOSS_SWEEP_TELEGRAPH_SECONDS } from '../src/bossAbilities.ts';
 
 const url = process.env.RHYTHM_FIGHTER_TEST_URL || process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/';
 
@@ -51,6 +52,24 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
     assert.equal(firstStage.bossAudioPaused, true);
 
     await page.evaluate(() => {
+      const api = window.__AUDIOSTRIKE_TEST__;
+      api.clearArena();
+      api.setPlayer({ x: 300, y: 600, vx: 0, vy: 0, invincible: 1e9 });
+      api.spawnTarget(100, 150, 1e9, false, 0, 1e9, 'SEEKER');
+    });
+    await page.clock.runFor(100);
+    const firedSeekers = (await snapshot()).enemyShots.filter((shot) => shot.kind === 'SEEKER');
+    assert.equal(firedSeekers.length, 1, 'the song-selected enemy weapon fires a single seeker');
+    const seekerBefore = firedSeekers[0];
+    const angleBefore = Math.atan2(seekerBefore.vy, seekerBefore.vx);
+    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ x: 80, y: 600, vx: 0, vy: 0 }));
+    await page.clock.runFor(100);
+    const seekerAfter = (await snapshot()).enemyShots.find((shot) => shot.kind === 'SEEKER');
+    assert.ok(seekerAfter, 'the seeker remains active while it tracks');
+    assert.ok(Math.atan2(seekerAfter.vy, seekerAfter.vx) > angleBefore, 'the live shot curves toward the player’s new position');
+    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.clearArena());
+
+    await page.evaluate(() => {
       window.__AUDIOSTRIKE_TEST__.setPlayer({ invincible: 1e9 });
       window.__AUDIOSTRIKE_TEST__.spawnTarget(80, 150, 1e9, false, .001, 30);
     });
@@ -76,14 +95,36 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
     assert.equal(firstBoss.stageAudioPaused, true);
     assert.equal(firstBoss.bossAudioPaused, false);
     assert.ok(survivor(firstBoss), 'boss arrival does not clear existing regular enemies');
+    await page.clock.runFor(2200);
+    const readyBosses = await snapshot();
+    assert.notEqual(readyBosses.bosses.at(-1).phase, 'INTRO', 'the boss can cast after its arrival animation');
+    const firstBossId = readyBosses.bosses.at(-1).id;
+    await page.evaluate((id) => window.__AUDIOSTRIKE_TEST__.castSecondary(id, 'SWEEP'), firstBossId);
+    await page.clock.runFor(50);
+    const telegraph = await snapshot();
+    assert.equal(telegraph.bossBeams.length, 1, 'the boss starts a separately tracked sweep');
+    assert.ok(telegraph.bossBeams[0].activeAt > telegraph.now, 'the beam has a visible warning period');
+    await page.getByTestId('button-pause').click();
+    const pausedBeam = await snapshot();
+    await page.clock.fastForward((BOSS_SWEEP_TELEGRAPH_SECONDS + .2) * 1000);
+    assert.deepEqual(await snapshot(), pausedBeam, 'pausing freezes the beam warning and encounter clock');
+    await page.getByTestId('button-resume').click();
+    await page.clock.runFor((BOSS_SWEEP_TELEGRAPH_SECONDS + .15) * 1000);
+    const activeBeam = await snapshot();
+    assert.equal(activeBeam.bossBeams.length, 1);
+    assert.ok(activeBeam.bossBeams[0].activeAt <= activeBeam.now, 'the warning transitions into an active sweep');
     await page.clock.runFor(1000);
     const duringBoss = await snapshot();
     assert.ok(survivor(duringBoss), 'regular enemies keep fighting alongside the boss');
-    assert.equal(duringBoss.spawnIndex, firstBoss.spawnIndex, 'regular spawning remains paused during the boss fight');
+    assert.ok(
+      duringBoss.enemyCount - duringBoss.subBossCount <= readyBosses.enemyCount - readyBosses.subBossCount,
+      'regular enemies do not spawn during the boss fight',
+    );
     await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.spawnSubBoss());
     assert.ok((await snapshot()).subBossCount >= 1, 'boss has independently tracked sub-bosses');
 
     await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.finishBoss());
+    assert.equal((await snapshot()).bossBeams.length, 0, 'boss death removes its active sweep immediately');
     const healthOnKill = (await snapshot()).playerHealth;
     await page.clock.runFor(600);
     const dying = await snapshot();

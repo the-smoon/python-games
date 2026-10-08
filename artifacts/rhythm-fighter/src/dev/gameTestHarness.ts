@@ -1,7 +1,7 @@
 import { generateForm } from '../encounterRules';
 import { EncounterScheduler } from '../encounterScheduler';
 import { encounterProgress } from '../gameRules';
-import type { ActiveBoss, CombatArsenal, CombatWorld, FeatureSet, PlayerEntity } from '../gameRuntimeTypes';
+import type { ActiveBoss, CombatArsenal, CombatWorld, FeatureSet, PlayerEntity, ProjectileKind } from '../gameRuntimeTypes';
 import { blankLiveFeatures } from '../soundtrackLifecycle';
 import { levelPair, type LocalTrack } from '../playlistRules';
 import type { PickupType } from '../weaponRules';
@@ -16,12 +16,12 @@ export type RhythmFighterTestApi = {
   spawnSubBoss: () => void;
   setEncounterElapsed: (seconds: number) => void;
   setBossHealth: (id: number, health: number) => void;
-  castSecondary: (id: number, kind: 'BLAST' | 'DEBUFF' | 'BUFF') => void;
+  castSecondary: (id: number, kind: 'BLAST' | 'DEBUFF' | 'BUFF' | 'SWEEP') => void;
   setAudioSpectrum: (id: number, band: SpectrumBand) => void;
   drop: (type: PickupType, x?: number, y?: number) => void;
   setPlayer: (values: Partial<PlayerEntity>) => void;
   clearArena: () => void;
-  spawnTarget: (x: number, y: number, health: number, subBoss?: boolean, speed?: number, fireRate?: number) => void;
+  spawnTarget: (x: number, y: number, health: number, subBoss?: boolean, speed?: number, fireRate?: number, projectile?: ProjectileKind) => void;
   enemyShot: (x: number, y: number, damage?: number) => void;
   freezeAt: (x: number, y: number) => void;
   setVolley: (value: number) => void;
@@ -129,6 +129,7 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         debris: game.debris.map(d => ({ generation: d.generation, size: d.size })),
         shockwaves: game.shockwaves.map(w => ({ ...w })),
         blasts: game.blasts.map(b => ({ ...b })),
+        bossBeams: game.bossBeams.map((beam) => ({ ...beam })),
         enemies: game.enemies.map((enemy) => ({
           x: enemy.x, y: enemy.y, health: enemy.health, shape: enemy.shape,
           motion: enemy.motion, pattern: enemy.pattern, projectile: enemy.projectile, subBoss: enemy.subBoss,
@@ -155,7 +156,7 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
     },
     castSecondary: (id, kind) => {
       const boss = runtime.getEncounters().findBoss(id);
-      if (boss) { boss.secondaryAt = runtime.gameNow() / 1000 - 1; boss.secondaryIndex = ['BLAST', 'DEBUFF', 'BUFF'].indexOf(kind); }
+      if (boss) { boss.secondaryAt = runtime.gameNow() / 1000 - 1; boss.secondaryIndex = ['BLAST', 'DEBUFF', 'BUFF', 'SWEEP'].indexOf(kind); }
     },
     setAudioSpectrum: (id, band) => {
       const track = runtime.getEncounters().findBoss(id)?.reactive;
@@ -184,16 +185,17 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
       game.enemies = [];
       game.bullets = [];
       game.enemyBullets = [];
+        game.bossBeams = [];
       game.spawnCooldown = 1e9;
       arsenal.drops = [];
     },
-    spawnTarget: (x, y, health, subBoss = false, speed = 0, fireRate = 0) => {
+    spawnTarget: (x, y, health, subBoss = false, speed = 0, fireRate = 0, projectile = 'ORB') => {
       const game = runtime.getGame();
       game.enemies.push({
         x, y, radius: 18, health, maxHealth: health, speed,
         behavior: 'PATROL', fireRate, fireTimer: 0, frame: 0, zigDir: 1,
         formX: x, formY: y, diving: false, dvx: 0, dvy: 0, shape: 'CIRCLE',
-        projectile: 'ORB', designProjectile: 'ORB', exiting: false, alive: true, subBoss,
+        projectile, designProjectile: projectile, exiting: false, alive: true, subBoss,
         form: generateForm(blankLiveFeatures(), 1), motion: 'SWEEP', designMotion: 'SWEEP',
         motionChangedAt: speed ? Infinity : runtime.gameNow() / 1000, pattern: 'TRACK',
       });

@@ -88,7 +88,8 @@ export function firePattern(
       });
     }
   };
-  if (pattern === 'TRACK') shot(aim);
+  if (kind === 'SEEKER') shot(aim);
+  else if (pattern === 'TRACK') shot(aim);
   else if (pattern === 'BURST') for (let index = -2; index <= 2; index += 1) shot(aim + index * .15);
   else if (pattern === 'RADIAL') for (let index = 0; index < 10; index += 1) shot(index * Math.PI / 5 + serial * .08, .8);
   else if (pattern === 'SPIRAL') for (let index = 0; index < 4; index += 1) shot(aim + index * Math.PI / 2 + serial * .13, .9);

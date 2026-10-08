@@ -2,9 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSongDesign, songSpawnIdentity, songSectionAtTime } from '../src/songDesign.ts';
 import { generateForm } from '../src/encounterRules.ts';
-import { FrameCombatSimulation } from '../src/combatSimulation.ts';
+import { advanceSeekerProjectiles, chooseProjectile, createEnemyProjectile, firePattern, FrameCombatSimulation } from '../src/combatSimulation.ts';
 import { pixelBurst, bossDeathBurst, advanceCombatEffects } from '../src/combatEffects.ts';
-import { disruptEnemies, castBossAbility, advanceBlasts, blastMovementField, BLAST_CHARGE_SECONDS } from '../src/bossAbilities.ts';
+import {
+  disruptEnemies, castBossAbility, advanceBlasts, advanceBossSweepBeams, bossSweepHitsPlayer,
+  bossSweepPosition, blastMovementField, BLAST_CHARGE_SECONDS, BOSS_SWEEP_TELEGRAPH_SECONDS,
+} from '../src/bossAbilities.ts';
 import { fireWeapon, newWeaponState, pickDrop, WEAPON_BALANCE } from '../src/weaponRules.ts';
 import { createPlaybackWindow, playbackTimeForElapsed, setPlaybackWindow } from '../src/playbackClips.ts';
 
@@ -13,7 +16,7 @@ const features = (key, s = signal) => ({ duration: 80, analyzedSeconds: 80, anal
 const enemy = () => ({ x: 150, y: 200, radius: 18, speed: 5, frame: 0, formX: 150, formY: 200, health: 100,
   maxHealth: 100, alive: true, fireTimer: 0, fireRate: 50, zigDir: 1, motion: 'SWEEP', behavior: 'PATROL', subBoss: false,
   shape: 'SQUARE', form: generateForm(signal, 0) });
-const world = () => ({ enemies: [enemy()], player: { x: 210, y: 600, vx: 0, vy: 0 }, blasts: [], particles: [], debris: [], shockwaves: [] });
+const world = () => ({ enemies: [enemy()], player: { x: 210, y: 600, vx: 0, vy: 0 }, blasts: [], bossBeams: [], particles: [], debris: [], shockwaves: [] });
 const simulation = new FrameCombatSimulation({ width: 420, height: 900, playerWidth: 20, playerHeight: 32, maxSpeed: 6.875, acceleration: .42, deceleration: .55 });
 
 test('song blueprints are stable and contrasting songs create different clean shape/palette identities', () => {
@@ -49,6 +52,39 @@ test('full-song motifs produce per-section enemy designs and follow playback pos
   assert.ok(new Set(design.sections.map((section) => section.color)).size > 1);
   assert.ok(new Set(design.sections.map((section) => section.projectile)).size >= 3);
   assert.notDeepEqual(songSpawnIdentity(song, song.motifs[0], 1, 0), songSpawnIdentity(song, song.motifs[5], 1, 5));
+});
+
+test('bright onset motifs select one readable seeker shot with bounded homing', () => {
+  const seekerSignal = { ...signal, onset: .9, centroid: .75, high: .42, low: .2, mid: .38 };
+  const song = features('seeker-song');
+  song.motifs = [signal, seekerSignal];
+  song.design = createSongDesign(song);
+  assert.equal(song.design.sections[1].projectile, 'SEEKER');
+  assert.equal(songSpawnIdentity(song, seekerSignal, 3, 1).projectile, 'SEEKER');
+  assert.equal(chooseProjectile(seekerSignal, 'PATROL'), 'SEEKER');
+
+  const shots = [];
+  firePattern(shots, 100, 100, { x: 150, y: 300 }, 'BURST', 'SEEKER', 8, 3, 1, 7);
+  assert.equal(shots.length, 1, 'seeker fire is a single projectile even for multi-shot patterns');
+  const seeker = shots[0];
+  assert.equal(seeker.kind, 'SEEKER');
+  const initialSpeed = Math.hypot(seeker.vx, seeker.vy);
+  const initialTurn = Math.atan2(seeker.vy, seeker.vx);
+  advanceSeekerProjectiles([seeker], { x: 250, y: 100 }, 6);
+  assert.ok(Math.atan2(seeker.vy, seeker.vx) < initialTurn, 'the projectile curves toward the player');
+  assert.ok(Math.abs(Math.hypot(seeker.vx, seeker.vy) - initialSpeed) < 1e-9, 'steering does not accelerate the shot');
+  assert.ok(seeker.seekSecondsLeft < .72 && seeker.seekSecondsLeft > 0);
+  advanceSeekerProjectiles([seeker], { x: 250, y: 100 }, 60);
+  assert.equal(seeker.seekSecondsLeft, 0);
+  const committedVelocity = { x: seeker.vx, y: seeker.vy };
+  advanceSeekerProjectiles([seeker], { x: 0, y: 0 }, 60);
+  assert.deepEqual({ x: seeker.vx, y: seeker.vy }, committedVelocity, 'the final trajectory no longer tracks the player');
+
+  const frozen = createEnemyProjectile(100, 100, 0, 8, 3, 'SEEKER');
+  frozen.frozenUntil = 10;
+  advanceSeekerProjectiles([frozen], { x: 200, y: 100 }, 12);
+  assert.equal(frozen.vx, 0, 'frozen seekers do not turn');
+  assert.equal(frozen.seekSecondsLeft, .72, 'frozen time does not consume the steering window');
 });
 
 test('random playback clips keep the first track at zero and wrap elapsed time inside later 30-second windows', () => {
@@ -140,6 +176,40 @@ test('active blast circles pull the ship inward and slow movement until detonati
   const highLevel = world();
   assert.equal(castBossAbility(highLevel, { id: 2, originLevel: 11, features: features('high'), secondaryAt: 0, secondaryIndex: 0 }, signal, 0), 'BLAST');
   assert.equal(highLevel.blasts.length, 6, 'the highest tested level adds more circles than level five');
+});
+
+test('boss sweeps telegraph first, move their safe lane, damage outside it, and clear with their owner', () => {
+  const w = world();
+  const boss = {
+    id: 41, x: 210, y: 118, radius: 55, originLevel: 2, phase: 'PHASE1',
+    features: features('sweep-song'), secondaryAt: 0, secondaryIndex: 3,
+  };
+  assert.equal(castBossAbility(w, boss, { ...signal, high: .9, low: .1, pulse: true }, 10), 'SWEEP');
+  assert.equal(w.bossBeams.length, 1);
+  const beam = w.bossBeams[0];
+  assert.equal(beam.ownerId, boss.id);
+  assert.ok(Math.abs(beam.activeAt - beam.createdAt - BOSS_SWEEP_TELEGRAPH_SECONDS) < 1e-9);
+
+  const warningTime = beam.createdAt + BOSS_SWEEP_TELEGRAPH_SECONDS / 2;
+  const warning = bossSweepPosition(beam, warningTime);
+  assert.equal(warning.active, false);
+  assert.equal(bossSweepHitsPlayer(beam, { x: warning.safeX, y: warning.y }, warningTime, 20, 32), false);
+
+  const firstSweep = bossSweepPosition(beam, beam.activeAt + .5);
+  const laterSweep = bossSweepPosition(beam, beam.activeAt + 1);
+  assert.ok(firstSweep.active);
+  assert.ok(firstSweep.y > beam.startY && firstSweep.y < beam.endY);
+  assert.notEqual(firstSweep.safeX, laterSweep.safeX, 'the cyan lane moves while the beam crosses the arena');
+  assert.equal(bossSweepHitsPlayer(beam, { x: firstSweep.safeX, y: firstSweep.y }, beam.activeAt + .5, 20, 32), false);
+  assert.equal(bossSweepHitsPlayer(beam, { x: 10, y: firstSweep.y }, beam.activeAt + .5, 20, 32), true);
+
+  advanceBossSweepBeams(w, [boss], beam.activeAt + .5);
+  assert.equal(w.bossBeams.length, 1);
+  advanceBossSweepBeams(w, [{ ...boss, phase: 'DYING' }], beam.activeAt + .5);
+  assert.equal(w.bossBeams.length, 0, 'a dying owner cannot leave a lingering hazard');
+  w.bossBeams.push(beam);
+  advanceBossSweepBeams(w, [boss], beam.endsAt);
+  assert.equal(w.bossBeams.length, 0, 'expired sweeps are removed');
 });
 
 test('automatic boss attacks use blast zones more often than alternate abilities', () => {

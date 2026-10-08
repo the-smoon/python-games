@@ -1,7 +1,5 @@
-import {
-  ARENA_HEIGHT, ARENA_WIDTH,
-  type ActiveBoss, type BossSweepBeam, type CombatWorld, type DelayedBlast, type LiveFeatures,
-} from './gameRuntimeTypes';
+import { ARENA_HEIGHT, ARENA_WIDTH } from './gameArena.ts';
+import type { ActiveBoss, BossSweepBeam, CombatWorld, DelayedBlast, LiveFeatures } from './gameRuntimeTypes';
 import { audioIntensity } from './encounterRules.ts';
 
 export const BOSS_DEATH_STUN_SECONDS = .45;

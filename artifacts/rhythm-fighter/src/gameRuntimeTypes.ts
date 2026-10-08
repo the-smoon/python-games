@@ -4,8 +4,7 @@ import { BOSS_ENCOUNTER_SECONDS, encounterProgress, type BossEncounter } from '.
 import type { LaserBeam, Pickup, PlayerShot } from './weaponRules';
 import type { SongDesign } from './songDesign';
 
-export const ARENA_WIDTH = 420;
-export const ARENA_HEIGHT = 900;
+export { ARENA_HEIGHT, ARENA_WIDTH } from './gameArena';
 
 export type GameState = 'UPLOAD' | 'ANALYZING' | 'COUNTDOWN' | 'PLAYING' | 'BOSS_INTRO' | 'BOSS' | 'GAME_OVER';
 export type Behavior = 'PATROL' | 'ZIGZAG' | 'FORMATION' | 'SWARM' | 'DIVE' | 'SHOOTER' | 'TANK';

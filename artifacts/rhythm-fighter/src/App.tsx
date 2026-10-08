@@ -15,10 +15,10 @@ import { EncounterScheduler } from './encounterScheduler';
 import { FrameCombatSimulation } from './combatSimulation';
 import { ARENA_HEIGHT as H, ARENA_WIDTH as W, createCombatViewSnapshot, type ActiveBoss, type CombatArsenal, type CombatWorld, type EnemyBulletEntity, type EnemyEntity, type FeatureSet, type GameState, type Joystick, type LiveFeatures, type ParticleEntity } from './gameRuntimeTypes';
 import { blankLiveFeatures, createReactiveTrack, readReactiveTrack, releaseBossAudio, resetReactiveTrack, SoundtrackLifecycle } from './soundtrackLifecycle';
-import { chooseBehavior, chooseProjectile, createEnemyProjectile, firePattern } from './combatSimulation';
+import { advanceSeekerProjectiles, chooseBehavior, chooseProjectile, createEnemyProjectile, firePattern } from './combatSimulation';
 import { shapePath, drawEnemyBody, drawBossBody } from './enemyVisuals';
 import { pixelBurst, bossDeathBurst, advanceCombatEffects, drawCombatEffects } from './combatEffects';
-import { disruptEnemies, castBossAbility, advanceBlasts, drawBossAbilities, blastMovementField } from './bossAbilities';
+import { disruptEnemies, castBossAbility, advanceBlasts, advanceBossSweepBeams, bossSweepHitsPlayer, drawBossAbilities, blastMovementField } from './bossAbilities';
 import { createSongDesign, songSpawnIdentity, songSectionAtTime } from './songDesign';
 import { prepareSong } from './songAnalysisCache';
 import { createPlaybackWindow, playbackTimeForElapsed, playbackWindowFor, seekToPlaybackStart, setPlaybackWindow } from './playbackClips';
@@ -96,7 +96,7 @@ function drawEnemyDamage(ctx: CanvasRenderingContext2D, enemy: EnemyEntity) {
 function drawEnemyProjectile(ctx: CanvasRenderingContext2D, bullet: EnemyBulletEntity) {
   const kind = bullet.kind ?? 'ORB';
   const radius = bullet.radius ?? 4;
-  const color = kind === 'SHARD' ? '#ffcc33' : kind === 'BOLT' ? '#ff5577' : kind === 'RING' ? '#ff8844' : '#ff3333';
+  const color = kind === 'SEEKER' ? '#65f3ff' : kind === 'SHARD' ? '#ffcc33' : kind === 'BOLT' ? '#ff5577' : kind === 'RING' ? '#ff8844' : '#ff3333';
   ctx.save();
   ctx.translate(bullet.x, bullet.y);
   ctx.rotate((bullet.spin ?? 0) + (bullet.frozenUntil ? 0 : performance.now() * .002));
@@ -108,6 +108,16 @@ function drawEnemyProjectile(ctx: CanvasRenderingContext2D, bullet: EnemyBulletE
     ctx.beginPath();
     ctx.moveTo(0, -radius * 1.5); ctx.lineTo(radius, 0); ctx.lineTo(0, radius * 1.5); ctx.lineTo(-radius, 0);
     ctx.closePath(); ctx.fill();
+  } else if (kind === 'SEEKER') {
+    ctx.beginPath();
+    ctx.moveTo(radius * 1.7, 0);
+    ctx.lineTo(-radius * .45, -radius * .75);
+    ctx.lineTo(-radius * .15, 0);
+    ctx.lineTo(-radius * .45, radius * .75);
+    ctx.closePath();
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(-radius * .4, 0); ctx.lineTo(-radius * 2.2, 0); ctx.stroke();
   } else if (kind === 'RING') {
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(0, 0, radius, 0, Math.PI * 2); ctx.stroke();
@@ -232,7 +242,7 @@ function Home() {
   const bossAudioRef = useRef<HTMLAudioElement | null>(null);
   const joystickRef = useRef<Joystick>(neutralJoystick());
   const starsRef = useRef<{ x: number; y: number; size: number; brightness: number; speed: number }[]>([]);
-  const gameRef = useRef<CombatWorld>({ state: 'UPLOAD', level: 1, stageFeatures: null, bossFeatures: null, audioContext: null, stageReactive: null, bossReactive: null, player: { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [], bullets: [], enemyBullets: [], particles: [], debris: [], blasts: [], shockwaves: [], boss: null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, bossArrivalAt: 0, introTimer: 0, countdown: 3, countdownTimer: 0, currentBehavior: '' });
+  const gameRef = useRef<CombatWorld>({ state: 'UPLOAD', level: 1, stageFeatures: null, bossFeatures: null, audioContext: null, stageReactive: null, bossReactive: null, player: { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [], bullets: [], enemyBullets: [], bossBeams: [], particles: [], debris: [], blasts: [], shockwaves: [], boss: null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, bossArrivalAt: 0, introTimer: 0, countdown: 3, countdownTimer: 0, currentBehavior: '' });
   const arsenalRef = useRef<CombatArsenal>({
     weapon: newWeaponState(), drops: [], beam: null,
     splashes: [] as { x: number; y: number; until: number }[],
@@ -454,7 +464,7 @@ function Home() {
       bombUntil: 0, message: '', messageUntil: 0, dropMisses: 0 };
     setCombatHud({ weapon: newWeaponState(), now: 0, message: '', messageUntil: 0 });
     game.player = { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 };
-    game.enemies = []; game.bullets = []; game.enemyBullets = []; game.particles = []; game.debris = []; game.blasts = []; game.shockwaves = []; game.boss = null;
+      game.enemies = []; game.bullets = []; game.enemyBullets = []; game.bossBeams = []; game.particles = []; game.debris = []; game.blasts = []; game.shockwaves = []; game.boss = null;
       game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.spawnCooldown = 0; game.stageDone = false; game.bossArrivalAt = 0; game.introTimer = 0;
     resetReactiveTrack(game.stageReactive);
     resetReactiveTrack(game.bossReactive);
@@ -616,6 +626,7 @@ function Home() {
       game.enemies = game.enemies.filter((enemy) => enemy.ownerId !== boss.id);
       game.enemyBullets = game.enemyBullets.filter((bullet) => bullet.ownerId !== boss.id);
       game.blasts = game.blasts.filter((blast) => blast.ownerId !== boss.id);
+      game.bossBeams = game.bossBeams.filter((beam) => beam.ownerId !== boss.id);
     };
     const addDrop = (type: PickupType, x: number, y: number) => {
       const arsenal = arsenalRef.current;
@@ -693,6 +704,7 @@ function Home() {
     const beginNextLevel = () => {
       const game = gameRef.current;
       game.level = nextLevel(game.level);
+      game.bossBeams = [];
       runProgressRef.current.levelReached = Math.max(runProgressRef.current.levelReached, game.level);
       loadLevelTracks(game.level);
       game.stageDone = false;
@@ -729,6 +741,7 @@ function Home() {
       arsenalRef.current.beam = null;
       arsenalRef.current.weapon.chargeStartedAt = null;
       game.bullets = [];
+      game.bossBeams = [];
       stageAudioRef.current?.pause(); bossAudioRef.current?.pause();
       for (const boss of encountersRef.current.bosses) releaseBossAudio(boss);
       encountersRef.current.reset();
@@ -935,6 +948,7 @@ function Home() {
         }
       }
       encountersRef.current.retainBosses((boss) => !completedBosses.has(boss));
+      advanceBossSweepBeams(game, encountersRef.current.bosses, now);
       separateBossPositions(encountersRef.current.bosses, W);
       game.boss = encountersRef.current.bosses.at(-1) ?? null;
       for (const enemy of game.enemies) {
@@ -1005,6 +1019,7 @@ function Home() {
       for (const bullet of game.enemyBullets) {
         if (tickFrozenBullet(bullet, now) && !bullet.alive) spawnParticles(game.particles, bullet.x, bullet.y, '#b8f6ff', 5);
       }
+      advanceSeekerProjectiles(game.enemyBullets, player, delta);
       game.enemyBullets = game.enemyBullets.filter((bullet) => bullet.alive);
       advanceProjectiles(game.bullets, game.enemyBullets, delta, W, H);
       if (arsenal.beam && now < arsenal.beam.until && canAttack()) {
@@ -1059,6 +1074,15 @@ function Home() {
             if (player.health <= 0) gameOver();
           }
         }
+      }
+      const sweepHit = game.bossBeams.some((beam) =>
+        bossSweepHitsPlayer(beam, player, now, PLAYER_W, PLAYER_H));
+      if (sweepHit && !damageProtected() && player.invincible <= 0 &&
+        arsenal.weapon.shieldUntil <= now) {
+        player.health = Math.max(0, player.health - 16);
+        player.invincible = 90;
+        spawnParticles(game.particles, player.x, player.y, '#ff5577', 14);
+        if (player.health <= 0) gameOver();
       }
       if (canAttack()) {
         for (const pickup of arsenal.drops) {

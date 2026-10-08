@@ -20,3 +20,5 @@ Pause timing regressions should include temporary weapon effects, uncollected pi
 **How to apply:** Advance the coordinated browser clock beyond the duration of the effects while paused, compare combat and playback snapshots, then confirm the effects remain active and only the previously playing tracks resume.
 
 Isolate exact bomb-damage browser checks from player rounds already in flight. **Why:** the short pickup-acquisition window can include a pending automatic volley, making exact boss-health deltas flaky. **How to apply:** clear queued player shots in the development-only test fixture before simulating a bomb pickup; do not change production weapon behavior to mask test timing.
+
+Laser hit assertions after a charge-cancel interaction can pass alone but fail in the full serial browser suite. **Why:** a fixed post-release timing window is sensitive to browser scheduling. **How to apply:** reproduce in isolation and synchronize the test to charge/cooldown state before changing production damage behavior.
