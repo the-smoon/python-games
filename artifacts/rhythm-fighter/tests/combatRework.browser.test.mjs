@@ -4,6 +4,7 @@ import test from 'node:test';
 import { chromium } from 'playwright-core';
 import { mkdir } from 'node:fs/promises';
 import { selectMockPlaylist } from './drivePlaylistFixture.mjs';
+import { BLAST_CHARGE_SECONDS } from '../src/bossAbilities.ts';
 
 const url = process.env.RHYTHM_FIGHTER_TEST_URL || process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/';
 function tone(hz) {
@@ -16,7 +17,7 @@ function tone(hz) {
   return wav;
 }
 
-test('cached analysis survives reload; five-second zones, temporary buffs and boss-death pixels work in portrait', { timeout: 90000 }, async () => {
+test('cached analysis survives reload; fast zones, temporary buffs and boss-death pixels work in portrait', { timeout: 90000 }, async () => {
   const executablePath = process.env.CHROMIUM_PATH || execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim();
   const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
   try {
@@ -62,18 +63,19 @@ test('cached analysis survives reload; five-second zones, temporary buffs and bo
     await page.evaluate(id => {
       const api = window.__AUDIOSTRIKE_TEST__;
       api.setBossHealth(id, 100000); api.clearArena();
-      api.setPlayer({ x: 210, y: 760, vx: 0, vy: 0, invincible: 0, health: 100 });
+      api.setPlayer({ x: 210, y: 760, vx: 0, vy: 0, invincible: 1e9, health: 100 });
       api.castSecondary(id, 'BLAST');
     }, boss.id);
     await page.clock.runFor(40);
     const charged = await snap();
     assert.ok(charged.blasts.some(b => b.kind === 'BLAST' && !b.detonated));
-    assert.ok(charged.blasts.every(b => b.explodeAt - b.createdAt === 5));
-    await page.clock.runFor(4860);
-    assert.ok((await snap()).blasts.some(b => !b.detonated), 'zones do not hit before their five-second warning ends');
-    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ invincible: 0, health: 100 }));
-    await page.clock.runFor(180);
-    assert.ok((await snap()).playerHealth <= 82, 'standing in a completed blast damages hull');
+    assert.ok(charged.blasts.every(b => Math.abs(b.explodeAt - b.createdAt - BLAST_CHARGE_SECONDS) < 1e-9));
+    assert.ok(BLAST_CHARGE_SECONDS < 1, 'boss blasts retain their fast warning');
+    await page.clock.runFor((BLAST_CHARGE_SECONDS - .15) * 1000);
+    assert.ok((await snap()).blasts.some(b => !b.detonated), 'zones remain telegraphed until detonation');
+    assert.equal((await snap()).playerHealth, 100, 'the warning does not deal damage');
+    await page.clock.runFor(200);
+    assert.ok((await snap()).playerHealth <= 82, 'a completed boss blast pierces temporary invulnerability');
     await page.evaluate(id => {
       const api = window.__AUDIOSTRIKE_TEST__;
       api.clearArena(); api.castSecondary(id, 'DEBUFF');
@@ -84,6 +86,20 @@ test('cached analysis survives reload; five-second zones, temporary buffs and bo
     const debuffed = await snap();
     assert.ok(debuffed.player.debuffUntil > debuffed.now);
     assert.ok(debuffed.player.debuffUntil - debuffed.now <= 5);
+    await page.evaluate(id => {
+      const api = window.__AUDIOSTRIKE_TEST__;
+      api.clearArena();
+      api.setPlayer({ x: 0, y: 760, vx: 0, vy: 0, invincible: 1e9, health: 100 });
+      api.castSecondary(id, 'SWEEP');
+    }, boss.id);
+    await page.clock.runFor(80);
+    const sweepSetup = await snap();
+    assert.equal(sweepSetup.bossBeams.length, 1, 'the boss creates its moving-safe-lane laser');
+    const sweep = sweepSetup.bossBeams[0];
+    const progressAtPlayer = Math.max(0, Math.min(1, (760 - sweep.startY) / (sweep.endY - sweep.startY)));
+    const playerCrossingAt = sweep.activeAt + progressAtPlayer * (sweep.endsAt - sweep.activeAt);
+    await page.clock.runFor(Math.max(0, (playerCrossingAt - sweepSetup.now + .18) * 1000));
+    assert.equal((await snap()).playerHealth, 84, 'the boss beam pierces temporary invulnerability outside its safe lane');
     await page.evaluate(id => {
       const api = window.__AUDIOSTRIKE_TEST__;
       api.clearArena(); api.setPlayer({ invincible: 1e9 });

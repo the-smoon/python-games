@@ -145,6 +145,16 @@ export function enemyShotHitsPlayer(bullet: { x: number; y: number; radius?: num
     bullet.y - radius > player.y + playerHeight / 2);
 }
 
+export function canPlayerTakeDamage(
+  invincible: number,
+  shieldUntil: number,
+  now: number,
+  damageProtected: boolean,
+  piercesInvulnerability = false,
+) {
+  return !damageProtected && shieldUntil <= now && (piercesInvulnerability || invincible <= 0);
+}
+
 export function configureGameplayAudio(stage: { loop: boolean }, boss: { loop: boolean }) {
   stage.loop = true;
   boss.loop = true;

@@ -106,6 +106,13 @@ export function bossSweepHitsPlayer(
   return Math.abs(player.x - position.safeX) > safeHalfWidth;
 }
 
+/** A continuous beam may damage the player only once during this cast. */
+export function claimBossSweepDamage(beam: BossSweepBeam) {
+  if (beam.playerHit) return false;
+  beam.playerHit = true;
+  return true;
+}
+
 /** End expired sweeps and immediately remove hazards from bosses that are gone or dying. */
 export function advanceBossSweepBeams(
   world: Pick<CombatWorld, 'bossBeams'>,

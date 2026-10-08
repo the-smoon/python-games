@@ -14,3 +14,4 @@
 - [Direct Node tests for AudioStrike](audiostrike-direct-node-tests.md) — runtime imports loaded by Node tests need explicit `.ts` extensions even when Vite accepts extensionless imports.
 - [Geometric visuals and death effects](audiostrike-effects-intent.md) — clean forms, permanent composite boss hulls, bounded pixel/debris deaths, and non-boss disruption.
 - [Durable song analyses](audiostrike-analysis-cache.md) — reuse versioned numerical documents across sessions; prepare boundary designs without persisting song bytes or fallback analyses.
+- [Boss damage through hit invulnerability](audiostrike-boss-damage-intent.md) — keep piercing exceptions source-specific, shields intact, and the bouncing beam safe lane effective.

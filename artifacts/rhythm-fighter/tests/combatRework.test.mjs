@@ -5,7 +5,7 @@ import { generateForm } from '../src/encounterRules.ts';
 import { advanceSeekerProjectiles, chooseProjectile, createEnemyProjectile, firePattern, FrameCombatSimulation } from '../src/combatSimulation.ts';
 import { pixelBurst, bossDeathBurst, advanceCombatEffects } from '../src/combatEffects.ts';
 import {
-  disruptEnemies, castBossAbility, advanceBlasts, advanceBossSweepBeams, bossSweepHitsPlayer,
+  disruptEnemies, castBossAbility, advanceBlasts, advanceBossSweepBeams, bossSweepHitsPlayer, claimBossSweepDamage,
   bossSweepPosition, blastMovementField, BLAST_CHARGE_SECONDS, BOSS_SWEEP_TELEGRAPH_SECONDS,
 } from '../src/bossAbilities.ts';
 import { fireWeapon, newWeaponState, pickDrop, WEAPON_BALANCE } from '../src/weaponRules.ts';
@@ -18,6 +18,16 @@ const enemy = () => ({ x: 150, y: 200, radius: 18, speed: 5, frame: 0, formX: 15
   shape: 'SQUARE', form: generateForm(signal, 0) });
 const world = () => ({ enemies: [enemy()], player: { x: 210, y: 600, vx: 0, vy: 0 }, blasts: [], bossBeams: [], particles: [], debris: [], shockwaves: [] });
 const simulation = new FrameCombatSimulation({ width: 420, height: 900, playerWidth: 20, playerHeight: 32, maxSpeed: 6.875, acceleration: .42, deceleration: .55 });
+
+test('direct boss BOLT shots are marked as piercing lasers, without changing regular projectile hits', () => {
+  const bossLaser = [];
+  firePattern(bossLaser, 100, 100, { x: 100, y: 500 }, 'TRACK', 'BOLT', 8, 8, 0, 7, true);
+  assert.equal(bossLaser.length, 1);
+  assert.equal(bossLaser[0].piercesInvulnerability, true);
+  const ordinary = [];
+  firePattern(ordinary, 100, 100, { x: 100, y: 500 }, 'TRACK', 'BOLT', 8, 8, 0, 7);
+  assert.equal(ordinary[0].piercesInvulnerability, false);
+});
 
 test('song blueprints are stable and contrasting songs create different clean shape/palette identities', () => {
   const bass = features('bass-audio'), bright = features('bright-audio', { ...signal, low: .05, high: .9, centroid: .8 });
@@ -214,6 +224,9 @@ test('boss sweeps telegraph first, move their safe lane, damage outside it, and 
   assert.notEqual(firstSweep.safeX, laterSweep.safeX, 'the cyan lane moves while the beam crosses the arena');
   assert.equal(bossSweepHitsPlayer(beam, { x: firstSweep.safeX, y: firstSweep.y }, beam.activeAt + .5, 20, 32), false);
   assert.equal(bossSweepHitsPlayer(beam, { x: 10, y: firstSweep.y }, beam.activeAt + .5, 20, 32), true);
+  const damageInstance = { ...beam };
+  assert.equal(claimBossSweepDamage(damageInstance), true);
+  assert.equal(claimBossSweepDamage(damageInstance), false, 'one active beam cannot deal damage every frame through invulnerability');
 
   advanceBossSweepBeams(w, [boss], beam.activeAt + .5);
   assert.equal(w.bossBeams.length, 1);

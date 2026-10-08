@@ -63,7 +63,7 @@ export type BulletEntity = PlayerShot;
 export type EnemyBulletEntity = {
   x: number; y: number; vx: number; vy: number; damage: number; alive: boolean;
   kind?: ProjectileKind; radius: number; spin?: number; frozenUntil?: number; ownerId?: number;
-  seekSecondsLeft?: number;
+  seekSecondsLeft?: number; piercesInvulnerability?: boolean;
 };
 export type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; pixel?: boolean; size?: number };
 export type DebrisEntity = {
@@ -105,6 +105,7 @@ export type BossSweepBeam = {
   safeSpeed: number;
   safeWidth: number;
   thickness: number;
+  playerHit?: boolean;
 };
 export type CombatArsenal = {
   weapon: ReturnType<typeof import('./weaponRules').newWeaponState>;

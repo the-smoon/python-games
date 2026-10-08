@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Crosshair, Gamepad2, Headphones, House, Pause, Play, RotateCcw, Volume2, Zap } from 'lucide-react';
 import { submitRunScore, type RunScoreInput } from '@workspace/api-client-react';
-import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
+import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, canPlayerTakeDamage, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
 import { audioIntensity, blendAudioSignals, bossHealth, chooseAttack, chooseMotion, generateForm, spawnProfile } from './encounterRules';
 import { advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, enemyDropChance, fireWeapon, freezeSplash, laserHitsTarget, newWeaponState, pickDrop, slowScale, tickFrozenBullet, WEAPON_BALANCE, type PickupType } from './weaponRules';
@@ -18,7 +18,7 @@ import { blankLiveFeatures, createReactiveTrack, readReactiveTrack, releaseBossA
 import { advanceSeekerProjectiles, chooseBehavior, chooseProjectile, createEnemyProjectile, firePattern } from './combatSimulation';
 import { shapePath, drawEnemyBody, drawBossBody } from './enemyVisuals';
 import { pixelBurst, bossDeathBurst, advanceCombatEffects, drawCombatEffects } from './combatEffects';
-import { disruptEnemies, castBossAbility, advanceBlasts, advanceBossSweepBeams, bossSweepHitsPlayer, drawBossAbilities, blastMovementField } from './bossAbilities';
+import { disruptEnemies, castBossAbility, advanceBlasts, advanceBossSweepBeams, bossSweepHitsPlayer, claimBossSweepDamage, drawBossAbilities, blastMovementField } from './bossAbilities';
 import { createSongDesign, songSpawnIdentity, songSectionAtTime } from './songDesign';
 import { prepareSong } from './songAnalysisCache';
 import type { SongPreviewState } from './SongDesignPreview';
@@ -905,7 +905,7 @@ function Home() {
       for (const blast of advanceBlasts(game, now)) {
         pixelBurst(game.particles, blast.x, blast.y, blast.kind === 'BLAST' ? '#ffb06b' : '#d9a6ff', 45, 1.2);
         if (Math.hypot(player.x - blast.x, player.y - blast.y) <= blast.radius + PLAYER_W / 2 &&
-          !damageProtected() && player.invincible <= 0 && arsenal.weapon.shieldUntil <= now) {
+          canPlayerTakeDamage(player.invincible, arsenal.weapon.shieldUntil, now, damageProtected(), blast.kind === 'BLAST')) {
           if (blast.kind === 'DEBUFF') {
             player.debuffUntil = now + 5;
             arsenal.message = 'Disrupted · movement and fire slowed for 5s'; arsenal.messageUntil = now + 5;
@@ -1042,7 +1042,10 @@ function Home() {
           castBossAbility(game, boss, live, now);
           boss.fireTimer -= bossDelta * (1 + audioIntensity(live) * .45);
           if (boss.fireTimer <= 0) {
-            firePattern(game.enemyBullets, boss.x, boss.y + boss.radius * .3, player, boss.pattern, boss.projectile, 7.4 + Math.min(2, level * .18), boss.pattern === 'TRACK' ? 8 : 4, game.frame, boss.id);
+            // Only the single aimed boss BOLT shot is the direct laser; other boss patterns keep ordinary hit-invulnerability.
+            const directLaser = boss.pattern === 'TRACK' && boss.projectile === 'BOLT';
+            firePattern(game.enemyBullets, boss.x, boss.y + boss.radius * .3, player, boss.pattern, boss.projectile,
+              7.4 + Math.min(2, level * .18), boss.pattern === 'TRACK' ? 8 : 4, game.frame, boss.id, directLaser);
             boss.fireTimer = clamp(attackInterval(live, level, true) - live.tempo * .06, 26, 110);
           }
         }
@@ -1094,7 +1097,7 @@ function Home() {
           combatSimulationRef.current.enemyHitsPlayer(enemy, player)) {
           enemy.alive = false;
           pixelBurst(game.particles, enemy.x, enemy.y, enemy.color ?? COLORS[enemy.behavior], 30);
-          if (!damageProtected() && player.invincible <= 0 && arsenal.weapon.shieldUntil <= now) {
+            if (canPlayerTakeDamage(player.invincible, arsenal.weapon.shieldUntil, now, damageProtected())) {
             player.health = Math.max(0, player.health - (enemy.subBoss ? 22 : enemy.behavior === 'TANK' ? 25 : 14));
             player.invincible = 90;
             spawnParticles(game.particles, player.x, player.y, '#ff3333', 14);
@@ -1168,17 +1171,18 @@ function Home() {
         }
         if (bullet.alive && enemyShotHitsPlayer(bullet, player, PLAYER_W, PLAYER_H)) {
           bullet.alive = false;
-          if (!damageProtected() && player.invincible <= 0 && arsenal.weapon.shieldUntil <= now) {
+          if (canPlayerTakeDamage(player.invincible, arsenal.weapon.shieldUntil, now, damageProtected(), bullet.piercesInvulnerability)) {
             player.health = Math.max(0, player.health - bullet.damage); player.invincible = 90;
             spawnParticles(game.particles, player.x, player.y, '#ff3333', 14);
             if (player.health <= 0) gameOver();
           }
         }
       }
-      const sweepHit = game.bossBeams.some((beam) =>
-        bossSweepHitsPlayer(beam, player, now, PLAYER_W, PLAYER_H));
-      if (sweepHit && !damageProtected() && player.invincible <= 0 &&
-        arsenal.weapon.shieldUntil <= now) {
+      const sweepHitBeam = game.bossBeams.find((beam) =>
+        !beam.playerHit && bossSweepHitsPlayer(beam, player, now, PLAYER_W, PLAYER_H));
+      if (sweepHitBeam &&
+        canPlayerTakeDamage(player.invincible, arsenal.weapon.shieldUntil, now, damageProtected(), true) &&
+        claimBossSweepDamage(sweepHitBeam)) {
         player.health = Math.max(0, player.health - 16);
         player.invincible = 90;
         spawnParticles(game.particles, player.x, player.y, '#ff5577', 14);
