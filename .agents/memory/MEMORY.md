@@ -6,7 +6,7 @@
 - [Drive upload browser checks](drive-upload-browser-checks.md) — verify persisted uploads through a fresh library request when Chrome discards the upload response body.
 - [Bazzite Chrome Flatpak controllers](audiostrike-bazzite-controller.md) — read-only udev access restored Chrome's controller enumeration; verify browser detection before changing game code.
 - [Audio-driven attack selection](audiostrike-audio-pattern-selection.md) — pre-match motifs set visual identity; live audio continues driving waves, attacks, and movement.
-- [Weapon switching tradeoffs](audiostrike-weapon-intent.md) — rank loss is intentional; wingmen alone are destructible upgrades, and freeze stays distinct from screen-clearing bombs.
+- [Weapon switching and rank cap](audiostrike-weapon-intent.md) — switching preserves rank with a cooldown; rank-7 weapon drops become mini-health, and freeze stays distinct from bombs.
 - [Playlist intent](audiostrike-playlist-intent.md) — Drive playlists are shared, uploads owner-only; odd lists pair continuously and replay retains the once-shuffled order.
 - [API codegen compatibility](api-codegen-compatibility.md) — formatted validators must match the installed Zod major version, not the generator's assumed default.
 - [API route test bundling](api-route-test-bundling.md) — inject persistence in route tests; bundle API validators and leave service dependencies external.
@@ -14,4 +14,4 @@
 - [Direct Node tests for AudioStrike](audiostrike-direct-node-tests.md) — runtime imports loaded by Node tests need explicit `.ts` extensions even when Vite accepts extensionless imports.
 - [Geometric visuals and death effects](audiostrike-effects-intent.md) — clean forms, permanent composite boss hulls, bounded pixel/debris deaths, and non-boss disruption.
 - [Durable song analyses](audiostrike-analysis-cache.md) — reuse versioned numerical documents across sessions; prepare boundary designs without persisting song bytes or fallback analyses.
-- [Boss damage through hit invulnerability](audiostrike-boss-damage-intent.md) — keep piercing exceptions source-specific, shields intact, and the bouncing beam safe lane effective.
+- [Shield-only hit protection](audiostrike-boss-damage-intent.md) — any connected damage hurts unless an active shield absorbs it; boss safe zones remain safe.

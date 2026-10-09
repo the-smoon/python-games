@@ -1,10 +1,10 @@
 ---
-name: Boss damage through hit invulnerability
-description: Which boss hazards pierce temporary player invulnerability and how their safety rules remain intact.
+name: Shield-only hit protection
+description: All connected damage can hurt the player unless an active shield absorbs it.
 ---
 
-Boss blast detonations, the direct aimed BOLT shot, and the moving safe-lane sweep can damage the player through temporary hit-invulnerability. Regular enemy hits and other boss projectile patterns still respect it. Shields and encounter-transition protection block all damage. The sweep's safe lane remains safe, and a sweep can damage the player at most once per cast.
+Remove temporary hit-invulnerability: every connected enemy or boss hit, including blasts, lasers, and sweeping beams, can damage the player unless an active shield absorbs it. Keep actual safe zones safe and prevent a single sustained attack from applying unintended per-frame damage.
 
-**Why:** The user requested these boss-specific exceptions; a sustained beam that damages every frame would drain health immediately, so bound each cast to one hit.
+**Why:** The user explicitly replaced source-specific invulnerability exceptions with a consistent rule that only an active shield protects the player.
 
-**How to apply:** Keep bypass rules attached to their specific attack sources rather than disabling invulnerability globally. Preserve shields, transition protection, and safe-lane collision checks.
+**How to apply:** Remove temporary hit-invulnerability as a damage gate for all sources; keep shield absorption and the actual geometry of boss safe zones.
