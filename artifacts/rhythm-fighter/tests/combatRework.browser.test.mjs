@@ -17,7 +17,7 @@ function tone(hz) {
   return wav;
 }
 
-test('cached analysis survives reload; fast zones, temporary buffs and boss-death pixels work in portrait', { timeout: 90000 }, async () => {
+test('cached analysis survives reload; boss damage, buffs and death effects work in portrait', { timeout: 90000 }, async () => {
   const executablePath = process.env.CHROMIUM_PATH || execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim();
   const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
   try {
@@ -50,10 +50,11 @@ test('cached analysis survives reload; fast zones, temporary buffs and boss-deat
     }
     await selectMockPlaylist(page, files); cacheCalls.length = 0;
     await start();
-    assert.equal(cacheCalls.filter(c => c.method === 'GET' && c.status === 200).length, 2);
+    assert.ok(cacheCalls.filter(c => c.method === 'GET' && c.status === 200).length >= 1,
+      'the reload reuses persisted analysis from the browser or shared cache');
     assert.equal(cacheCalls.filter(c => c.method === 'PUT').length, 0, 'a fresh page reuses analysis without decoding and resaving');
     assert.deepEqual((await snap()).stageAnalysis.design, first.stageAnalysis.design);
-    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ invincible: 1e9 }));
+    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ health: 100000 }));
     await page.clock.fastForward(30100);
     await page.clock.runFor(5200);
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__.snapshot().state === 'BOSS');
@@ -63,7 +64,7 @@ test('cached analysis survives reload; fast zones, temporary buffs and boss-deat
     await page.evaluate(id => {
       const api = window.__AUDIOSTRIKE_TEST__;
       api.setBossHealth(id, 100000); api.clearArena();
-      api.setPlayer({ x: 210, y: 760, vx: 0, vy: 0, invincible: 1e9, health: 100 });
+      api.setPlayer({ x: 210, y: 760, vx: 0, vy: 0, health: 100 });
       api.castSecondary(id, 'BLAST');
     }, boss.id);
     await page.clock.runFor(40);
@@ -75,7 +76,7 @@ test('cached analysis survives reload; fast zones, temporary buffs and boss-deat
     assert.ok((await snap()).blasts.some(b => !b.detonated), 'zones remain telegraphed until detonation');
     assert.equal((await snap()).playerHealth, 100, 'the warning does not deal damage');
     await page.clock.runFor(200);
-    assert.ok((await snap()).playerHealth <= 82, 'a completed boss blast pierces temporary invulnerability');
+    assert.ok((await snap()).playerHealth <= 82, 'a completed boss blast damages hull without a shield');
     await page.evaluate(id => {
       const api = window.__AUDIOSTRIKE_TEST__;
       api.clearArena(); api.castSecondary(id, 'DEBUFF');
@@ -89,7 +90,7 @@ test('cached analysis survives reload; fast zones, temporary buffs and boss-deat
     await page.evaluate(id => {
       const api = window.__AUDIOSTRIKE_TEST__;
       api.clearArena();
-      api.setPlayer({ x: 0, y: 760, vx: 0, vy: 0, invincible: 1e9, health: 100 });
+      api.setPlayer({ x: 0, y: 760, vx: 0, vy: 0, health: 100 });
       api.castSecondary(id, 'SWEEP');
     }, boss.id);
     await page.clock.runFor(80);
@@ -99,10 +100,10 @@ test('cached analysis survives reload; fast zones, temporary buffs and boss-deat
     const progressAtPlayer = Math.max(0, Math.min(1, (760 - sweep.startY) / (sweep.endY - sweep.startY)));
     const playerCrossingAt = sweep.activeAt + progressAtPlayer * (sweep.endsAt - sweep.activeAt);
     await page.clock.runFor(Math.max(0, (playerCrossingAt - sweepSetup.now + .18) * 1000));
-    assert.equal((await snap()).playerHealth, 84, 'the boss beam pierces temporary invulnerability outside its safe lane');
+    assert.equal((await snap()).playerHealth, 84, 'the boss beam damages hull outside its safe lane');
     await page.evaluate(id => {
       const api = window.__AUDIOSTRIKE_TEST__;
-      api.clearArena(); api.setPlayer({ invincible: 1e9 });
+      api.clearArena(); api.setPlayer({ health: 100000 });
       api.spawnTarget(80, 310, 1e8, false, .1, 40); api.castSecondary(id, 'BUFF');
     }, boss.id);
     await page.clock.runFor(40);
@@ -133,6 +134,221 @@ test('cached analysis survives reload; fast zones, temporary buffs and boss-deat
     const afterDeath = await snap();
     assert.ok(afterDeath.enemies.filter(e => e.health > 1e7).every(e => e.confusedUntil < afterDeath.now));
     assert.equal(afterDeath.level, 2);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); }
+});
+
+test('combat progression, shield expiry, hostile shots and collisions follow the new rules', { timeout: 90000 }, async () => {
+  const executablePath = process.env.CHROMIUM_PATH || execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim();
+  const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
+  try {
+    const page = await browser.newPage({ viewport: { width: 412, height: 915 } });
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.clock.install();
+    await page.addInitScript(() => { window.__RHYTHM_FIGHTER_TEST_MODE__ = true; });
+    await page.goto(url);
+    await selectMockPlaylist(page, [
+      { name: 'combat-stage.mp3', buffer: tone(271) },
+      { name: 'combat-boss.mp3', buffer: tone(1413) },
+    ]);
+    await page.getByTestId('button-analyze').click();
+    await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
+    const run = (fn, arg) => page.evaluate(fn, arg);
+    const tick = (ms = 40) => page.clock.runFor(ms);
+    const snap = () => page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot());
+    const pickup = async (type) => {
+      await run(t => window.__AUDIOSTRIKE_TEST__.drop(t), type);
+      await tick(50);
+    };
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__;
+      api.clearArena();
+      api.setPlayer({ x: 210, y: 760, vx: 0, vy: 0, health: 50 });
+    });
+
+    // Switching keeps rank and hull, then shadows only weapon drops for thirty seconds.
+    await pickup('SPREAD');
+    let state = await snap();
+    assert.equal(state.weapon.type, 'SPREAD');
+    assert.equal(state.weapon.rank, 1);
+    assert.equal(state.playerHealth, 50);
+    assert.ok(state.weapon.weaponSwitchUntil - state.now > 29);
+    assert.match(await page.getByTestId('hud-weapon').innerText(), /Weapon lock/);
+    await pickup('TWIN');
+    state = await snap();
+    assert.equal(state.weapon.rank, 1, 'a weapon drop cannot rank up during the switch lock');
+    assert.ok(state.drops.some(drop => drop.type === 'TWIN' && drop.alive), 'the blocked pickup remains on screen');
+    await pickup('REPAIR');
+    assert.equal((await snap()).playerHealth, 75, 'non-weapon pickups remain available during the lock');
+
+    // Higher shields replace at full HP. Expiry emits exactly one projectile per remaining shield HP.
+    await pickup('SHIELD');
+    assert.equal((await snap()).weapon.shieldHP, 20);
+    await pickup('SHIELD_2');
+    state = await snap();
+    assert.deepEqual([state.weapon.shieldTier, state.weapon.shieldHP, state.weapon.shieldMaxHP], [2, 35, 35]);
+    assert.ok(Math.abs(state.weapon.shieldUntil - state.now - 10) < .2);
+    assert.equal(await page.getByTestId('hud-shield').isVisible(), true);
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
+      api.enemyShot(p.x, p.y, 5);
+    });
+    await tick(40);
+    assert.equal((await snap()).playerHealth, 75);
+    assert.equal((await snap()).weapon.shieldHP, 30);
+    const expiryAt = (await snap()).now + .12;
+    await run(until => {
+      const api = window.__AUDIOSTRIKE_TEST__;
+      api.clearArena();
+      api.setWeapon({ shieldTier: 2, shieldHP: 3, shieldMaxHP: 35, shieldUntil: until });
+    }, expiryAt);
+    await tick(220);
+    state = await snap();
+    assert.equal(state.weapon.shieldHP, 0);
+    assert.equal(state.shots.filter(shot => shot.shieldBurst).length, 3);
+    assert.equal(await page.getByTestId('hud-shield').count(), 0);
+
+    // Legacy invincibility state must not protect hull from consecutive connected hits.
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
+      api.setPlayer({ health: 100, invincible: 1e9 });
+      api.enemyShot(p.x, p.y, 5);
+    });
+    await tick(40);
+    assert.equal((await snap()).playerHealth, 95);
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
+      api.enemyShot(p.x, p.y, 5);
+    });
+    await tick(40);
+    assert.equal((await snap()).playerHealth, 90);
+
+    // Standard weapon shots remove ordinary bullets but leave marked boss hazards intact.
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
+      api.clearArena();
+      api.setWeapon({
+        type: 'SPREAD', rank: 1, nextFireAt: 0, volley: 0,
+        chargeStartedAt: null, cooldownUntil: 0,
+      });
+      api.enemyShot(p.x - 7, p.y - 42, 3, false);
+      api.enemyShot(p.x + 7, p.y - 42, 3, true);
+    });
+    await tick(900);
+    state = await snap();
+    assert.equal(state.enemyShots.filter(shot => shot.alive && !shot.indestructible).length, 0);
+    assert.equal(state.enemyShots.filter(shot => shot.alive && shot.indestructible).length, 1);
+    await run(() => window.__AUDIOSTRIKE_TEST__.drop('BOMB'));
+    await tick(60);
+    assert.equal((await snap()).enemyShots.filter(shot => shot.alive && shot.indestructible).length, 1,
+      'the bomb also leaves a special boss projectile intact');
+
+    // Let the switch timer end, then rank the held weapon all the way to seven.
+    await run(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ health: 100000 }));
+    await page.clock.fastForward(30100);
+    await page.clock.runFor(5200);
+    await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'BOSS');
+    state = await snap();
+    assert.ok(state.weapon.weaponSwitchUntil <= state.now, JSON.stringify({
+      state: state.state, now: state.now, weaponSwitchUntil: state.weapon.weaponSwitchUntil,
+    }));
+    for (let rank = 2; rank <= 7; rank += 1) {
+      await pickup('SPREAD');
+      state = await snap();
+      assert.equal(state.weapon.rank, rank, JSON.stringify({
+        state: state.state, now: state.now, weaponSwitchUntil: state.weapon.weaponSwitchUntil,
+        drops: state.drops,
+      }));
+    }
+    assert.equal(state.weapon.rank, 7);
+    assert.equal(state.weapon.type, 'SPREAD');
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__;
+      api.setPlayer({ health: 50 });
+      api.drop('TWIN');
+    });
+    await tick(50);
+    assert.equal((await snap()).playerHealth, 60, 'weapon drops convert to +10 mini-health at rank seven');
+    await pickup('REPAIR');
+    assert.equal((await snap()).playerHealth, 85, 'regular repair remains +25');
+
+    // Common-enemy rams are severe; a shield both absorbs the collision and destroys the enemy.
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
+      api.clearArena();
+      api.setBossFireTimer(api.snapshot().bosses[0].id, 1e9);
+      api.setBossPosition(api.snapshot().bosses[0].id, 35, 100);
+      api.setWeapon({ type: 'LASER', cooldownUntil: api.snapshot().now + 1000, chargeStartedAt: null });
+      api.setPlayer({ x: 210, y: 760, vx: 0, vy: 0, health: 100, invincible: 1e9 });
+      api.spawnTarget(210, 760, 100);
+    });
+    await tick(40);
+    assert.equal((await snap()).playerHealth, 64, 'unshielded enemy ramming removes 36 hull');
+
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__;
+      api.clearArena();
+      api.setWeapon({ type: 'LASER', cooldownUntil: api.snapshot().now + 1000, chargeStartedAt: null });
+      api.setPlayer({ x: 210, y: 760, vx: 0, vy: 0, health: 100 });
+      api.drop('SHIELD');
+    });
+    await tick(50);
+    await run(() => window.__AUDIOSTRIKE_TEST__.spawnTarget(210, 760, 40));
+    await tick(40);
+    state = await snap();
+    assert.equal(state.playerHealth, 100, 'the active shield absorbs ramming damage');
+    assert.equal(state.weapon.shieldHP, 0);
+    assert.equal(state.enemies.length, 0, 'shielded ramming destroys a common enemy');
+
+    // Breaking a shield triggers the short forward cone; it can hit enemies ahead, not bosses.
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
+      api.setWeapon({ type: 'LASER', cooldownUntil: api.snapshot().now + 1000, chargeStartedAt: null });
+      api.drop('SHIELD');
+      api.spawnTarget(p.x, p.y - 80, 40);
+    });
+    await tick(50);
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
+      api.enemyShot(p.x, p.y, 25);
+    });
+    await tick(50);
+    assert.equal((await snap()).enemies.length, 0);
+    assert.ok((await snap()).shieldBlastUntil > (await snap()).now);
+
+    // Bosses hurt on contact, but player ramming never reduces boss health.
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, boss = api.snapshot().bosses[0];
+      api.clearArena();
+      api.setBossFireTimer(boss.id, 1e9);
+      api.setBossPhase(boss.id, 'PHASE1');
+      api.setWeapon({ type: 'LASER', cooldownUntil: api.snapshot().now + 1000, chargeStartedAt: null });
+      api.setPlayer({ x: boss.x, y: boss.y, vx: 0, vy: 0, health: 100 });
+      api.setBossHealth(boss.id, 100000);
+    });
+    await tick(40);
+    assert.equal((await snap()).playerHealth, 55, 'boss collision severely damages hull');
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, boss = api.snapshot().bosses[0];
+      api.setBossPosition(boss.id, 35, 100);
+      api.setBossPhase(boss.id, 'PHASE1');
+      api.setBossHealth(boss.id, 100000);
+      api.setWeapon({ type: 'LASER', cooldownUntil: api.snapshot().now + 1000, chargeStartedAt: null });
+      api.setPlayer({ x: 210, y: 760, vx: 0, vy: 0, health: 100 });
+      api.drop('SHIELD');
+    });
+    await tick(50);
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__, boss = api.snapshot().bosses[0];
+      api.setBossPhase(boss.id, 'PHASE1');
+      api.setPlayer({ x: boss.x, y: boss.y, vx: 0, vy: 0, health: 100 });
+      api.setBossPosition(boss.id, boss.x, boss.y);
+    });
+    await tick(40);
+    state = await snap();
+    assert.equal(state.playerHealth, 100);
+    assert.equal(state.bosses[0].health, 100000, 'player ram does not damage a boss');
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
 });

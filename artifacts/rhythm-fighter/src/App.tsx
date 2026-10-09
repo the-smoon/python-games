@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Crosshair, Gamepad2, Headphones, House, Pause, Play, RotateCcw, Volume2, Zap } from 'lucide-react';
 import { submitRunScore, type RunScoreInput } from '@workspace/api-client-react';
-import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, canPlayerTakeDamage, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
+import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
 import { audioIntensity, blendAudioSignals, bossHealth, chooseAttack, chooseMotion, generateForm, spawnProfile } from './encounterRules';
-import { advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, enemyDropChance, fireWeapon, freezeSplash, laserHitsTarget, newWeaponState, pickDrop, slowScale, tickFrozenBullet, WEAPON_BALANCE, type PickupType } from './weaponRules';
+import { absorbShieldHit, advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, convertWeaponPickupsAtMaxRank, enemyDropChance, expireShield, fireWeapon, freezeSplash, hasActiveShield, insideForwardShieldCone, isWeaponPickup, laserHitsTarget, newWeaponState, pickDrop, slowScale, tickFrozenBullet, WEAPON_BALANCE, type PickupType } from './weaponRules';
 import WeaponHUD from './WeaponHUD';
 import { drawFrozenHalo, drawWeaponEffects } from './weaponVisuals';
 import { analyzeMusic } from './musicAnalysis';
@@ -250,11 +250,11 @@ function Home() {
   const bossAudioRef = useRef<HTMLAudioElement | null>(null);
   const joystickRef = useRef<Joystick>(neutralJoystick());
   const starsRef = useRef<{ x: number; y: number; size: number; brightness: number; speed: number }[]>([]);
-  const gameRef = useRef<CombatWorld>({ state: 'UPLOAD', level: 1, stageFeatures: null, bossFeatures: null, audioContext: null, stageReactive: null, bossReactive: null, player: { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 }, enemies: [], bullets: [], enemyBullets: [], bossBeams: [], particles: [], debris: [], blasts: [], shockwaves: [], boss: null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, bossArrivalAt: 0, introTimer: 0, countdown: 3, countdownTimer: 0, currentBehavior: '' });
+  const gameRef = useRef<CombatWorld>({ state: 'UPLOAD', level: 1, stageFeatures: null, bossFeatures: null, audioContext: null, stageReactive: null, bossReactive: null, player: { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, fireTimer: 0, frame: 0 }, enemies: [], bullets: [], enemyBullets: [], bossBeams: [], particles: [], debris: [], blasts: [], shockwaves: [], boss: null, score: 0, frame: 0, songStart: 0, bossStart: 0, beatIndex: 0, spawnIndex: 0, spawnCooldown: 0, stageDone: false, bossArrivalAt: 0, introTimer: 0, countdown: 3, countdownTimer: 0, currentBehavior: '' });
   const arsenalRef = useRef<CombatArsenal>({
     weapon: newWeaponState(), drops: [], beam: null,
     splashes: [] as { x: number; y: number; until: number }[],
-    bombUntil: 0, message: '', messageUntil: 0, dropMisses: 0,
+    bombUntil: 0, shieldBlastUntil: 0, message: '', messageUntil: 0, dropMisses: 0,
   });
   const [combatHud, setCombatHud] = useState({ weapon: newWeaponState(), now: 0, message: '', messageUntil: 0 });
   const [state, setState] = useState<GameState>('UPLOAD');
@@ -499,9 +499,9 @@ function Home() {
     game.level = 1;
     loadLevelTracks(1);
     arsenalRef.current = { weapon: newWeaponState(), drops: [], beam: null, splashes: [],
-      bombUntil: 0, message: '', messageUntil: 0, dropMisses: 0 };
+      bombUntil: 0, shieldBlastUntil: 0, message: '', messageUntil: 0, dropMisses: 0 };
     setCombatHud({ weapon: newWeaponState(), now: 0, message: '', messageUntil: 0 });
-    game.player = { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 };
+    game.player = { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, fireTimer: 0, frame: 0 };
       game.enemies = []; game.bullets = []; game.enemyBullets = []; game.bossBeams = []; game.particles = []; game.debris = []; game.blasts = []; game.shockwaves = []; game.boss = null;
       game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.spawnCooldown = 0; game.stageDone = false; game.bossArrivalAt = 0; game.introTimer = 0;
     resetReactiveTrack(game.stageReactive);
@@ -537,7 +537,7 @@ function Home() {
     game.level = 1;
     game.stageFeatures = null;
     game.bossFeatures = null;
-    game.player = { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, invincible: 0, fireTimer: 0, frame: 0 };
+    game.player = { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, fireTimer: 0, frame: 0 };
     game.enemies = [];
     game.bullets = [];
     game.enemyBullets = [];
@@ -563,7 +563,7 @@ function Home() {
 
     arsenalRef.current = {
       weapon: newWeaponState(), drops: [], beam: null, splashes: [],
-      bombUntil: 0, message: '', messageUntil: 0, dropMisses: 0,
+      bombUntil: 0, shieldBlastUntil: 0, message: '', messageUntil: 0, dropMisses: 0,
     };
     activeRunIdRef.current = null;
     finalRunRef.current = null;
@@ -731,7 +731,9 @@ function Home() {
     const addDrop = (type: PickupType, x: number, y: number) => {
       const arsenal = arsenalRef.current;
       if (arsenal.drops.length >= WEAPON_BALANCE.maxDrops) return;
-      arsenal.drops.push({ type, x: clamp(x, 22, W - 22), y: clamp(y, 80, H - 130),
+      const pickupType = arsenal.weapon.rank >= WEAPON_BALANCE.maxRank && isWeaponPickup(type)
+        ? 'MINI_REPAIR' : type;
+      arsenal.drops.push({ type: pickupType, x: clamp(x, 22, W - 22), y: clamp(y, 80, H - 130),
         expiresAt: gameNow() / 1000 + WEAPON_BALANCE.dropSeconds, alive: true });
     };
     const killEnemy = (enemy: EnemyEntity, allowDrop = true) => {
@@ -778,8 +780,10 @@ function Home() {
     const triggerBomb = () => {
       const game = gameRef.current;
       if (game.state === 'GAME_OVER') return;
-      for (const shot of game.enemyBullets) spawnParticles(game.particles, shot.x, shot.y, '#ffb2cc', 2);
-      game.enemyBullets = [];
+      for (const shot of game.enemyBullets) {
+        if (!shot.indestructible) spawnParticles(game.particles, shot.x, shot.y, '#ffb2cc', 2);
+      }
+      game.enemyBullets = game.enemyBullets.filter((shot) => shot.indestructible);
       for (const enemy of game.enemies) {
         if (!enemy.alive || enemy.y + enemy.radius < 0 || enemy.y - enemy.radius > H) continue;
         enemy.health = Math.max(0, enemy.health - bombDamage(enemy));
@@ -796,6 +800,7 @@ function Home() {
       const now = gameNow() / 1000;
       const result = collectPickup(arsenal.weapon, type, game.player.health, now);
       game.player.health = result.health;
+      convertWeaponPickupsAtMaxRank(arsenal.drops, arsenal.weapon);
       arsenal.beam = null;
       arsenal.message = result.message; arsenal.messageUntil = now + 2.5;
       spawnParticles(game.particles, game.player.x, game.player.y, '#c5fff2', 10, 2, 7);
@@ -872,11 +877,50 @@ function Home() {
       if (game.state !== 'PLAYING' && game.state !== 'BOSS' && game.state !== 'BOSS_INTRO') return;
       const arsenal = arsenalRef.current;
       const now = gameNow() / 1000;
+      const player = game.player;
+      const shieldBreakEffects = () => {
+        arsenal.shieldBlastUntil = now + .38;
+        spawnParticles(game.particles, player.x, player.y, '#69efff', 22, 3, 10);
+        for (const enemy of game.enemies) {
+          if (!enemy.alive || !insideForwardShieldCone(player, enemy)) continue;
+          enemy.health -= 55;
+          spawnImpactDust(game.particles, enemy.x, enemy.y, '#69efff');
+          if (enemy.health <= 0) killEnemy(enemy, false);
+        }
+      };
+      const afterShieldAbsorb = (result: ReturnType<typeof absorbShieldHit>) => {
+        if (!result.absorbed) return;
+        spawnParticles(game.particles, player.x, player.y, '#7fdfff', 8, 1, 5);
+        if (result.destroyed) shieldBreakEffects();
+      };
+      const applyPlayerDamage = (amount: number, color = '#ff3333') => {
+        if (damageProtected()) return;
+        const shieldHit = absorbShieldHit(arsenal.weapon, amount, now);
+        if (shieldHit.absorbed) {
+          afterShieldAbsorb(shieldHit);
+          return;
+        }
+        player.health = Math.max(0, player.health - amount);
+        spawnParticles(game.particles, player.x, player.y, color, 14);
+        if (player.health <= 0) gameOver();
+      };
+      const expiredShieldShots = expireShield(arsenal.weapon, now);
+      for (let index = 0; index < expiredShieldShots; index += 1) {
+        const angle = expiredShieldShots === 1
+          ? -Math.PI / 2
+          : -Math.PI * .82 + (Math.PI * .64 * index) / (expiredShieldShots - 1);
+        game.bullets.push({
+          x: player.x, y: player.y - 18,
+          vx: Math.cos(angle) * 42, vy: Math.sin(angle) * 42,
+          alive: true, damage: 4, radius: 3, freeze: false,
+          weapon: arsenal.weapon.type, rank: arsenal.weapon.rank, shieldBurst: true,
+        });
+      }
+      convertWeaponPickupsAtMaxRank(arsenal.drops, arsenal.weapon);
       game.shockwaves = game.shockwaves.filter(effect => effect.until > now);
       arsenal.splashes = arsenal.splashes.filter((effect) => effect.until > now);
       if (arsenal.beam && arsenal.beam.until <= now) arsenal.beam = null;
       let stageSecondsLeft = 0;
-      const player = game.player;
       let joystick = joystickRef.current;
       let controllerInput = neutralControllerVector();
       if (typeof navigator !== 'undefined' && typeof navigator.getGamepads === 'function') {
@@ -896,7 +940,6 @@ function Home() {
       combatSimulationRef.current.movePlayer(player, {
         x: joystick.dx, y: joystick.dy, active: isSteering,
       }, delta, game.state === 'BOSS', now, blastMovementField(game.blasts, player.x, player.y, now));
-      player.invincible = Math.max(0, player.invincible - delta);
       finishEncounter();
       const volley = fireWeapon(arsenal.weapon, player, now);
       game.bullets.push(...volley.shots.slice(0, Math.max(0, WEAPON_BALANCE.maxBullets - game.bullets.length)));
@@ -905,13 +948,16 @@ function Home() {
       for (const blast of advanceBlasts(game, now)) {
         pixelBurst(game.particles, blast.x, blast.y, blast.kind === 'BLAST' ? '#ffb06b' : '#d9a6ff', 45, 1.2);
         if (Math.hypot(player.x - blast.x, player.y - blast.y) <= blast.radius + PLAYER_W / 2 &&
-          canPlayerTakeDamage(player.invincible, arsenal.weapon.shieldUntil, now, damageProtected(), blast.kind === 'BLAST')) {
+          !damageProtected()) {
           if (blast.kind === 'DEBUFF') {
-            player.debuffUntil = now + 5;
-            arsenal.message = 'Disrupted · movement and fire slowed for 5s'; arsenal.messageUntil = now + 5;
+            const shieldHit = absorbShieldHit(arsenal.weapon, 1, now);
+            if (shieldHit.absorbed) afterShieldAbsorb(shieldHit);
+            else {
+              player.debuffUntil = now + 5;
+              arsenal.message = 'Disrupted · movement and fire slowed for 5s'; arsenal.messageUntil = now + 5;
+            }
           } else {
-            player.health = Math.max(0, player.health - 18); player.invincible = 90;
-            if (player.health <= 0) gameOver();
+            applyPlayerDamage(18, '#ff9d67');
           }
         }
       }
@@ -1039,13 +1085,16 @@ function Home() {
             boss.subBossTimer = clamp(680 - audioIntensity(live) * 350 - level * 15, 240, 680);
           }
           combatSimulationRef.current.moveBoss(boss, player, live, bossDelta);
+          if (now >= (boss.playerCollisionUntil ?? 0) &&
+            Math.hypot(player.x - boss.x, player.y - boss.y) <= boss.radius + 18) {
+            boss.playerCollisionUntil = now + .85;
+            applyPlayerDamage(45, '#ff5577');
+          }
           castBossAbility(game, boss, live, now);
           boss.fireTimer -= bossDelta * (1 + audioIntensity(live) * .45);
           if (boss.fireTimer <= 0) {
-            // Only the single aimed boss BOLT shot is the direct laser; other boss patterns keep ordinary hit-invulnerability.
-            const directLaser = boss.pattern === 'TRACK' && boss.projectile === 'BOLT';
             firePattern(game.enemyBullets, boss.x, boss.y + boss.radius * .3, player, boss.pattern, boss.projectile,
-              7.4 + Math.min(2, level * .18), boss.pattern === 'TRACK' ? 8 : 4, game.frame, boss.id, directLaser);
+              7.4 + Math.min(2, level * .18), boss.pattern === 'TRACK' ? 8 : 4, game.frame, boss.id, true);
             boss.fireTimer = clamp(attackInterval(live, level, true) - live.tempo * .06, 26, 110);
           }
         }
@@ -1095,14 +1144,15 @@ function Home() {
         }
         if (enemy.alive && !enemy.exiting && enemyOnScreen &&
           combatSimulationRef.current.enemyHitsPlayer(enemy, player)) {
-          enemy.alive = false;
-          pixelBurst(game.particles, enemy.x, enemy.y, enemy.color ?? COLORS[enemy.behavior], 30);
-            if (canPlayerTakeDamage(player.invincible, arsenal.weapon.shieldUntil, now, damageProtected())) {
-            player.health = Math.max(0, player.health - (enemy.subBoss ? 22 : enemy.behavior === 'TANK' ? 25 : 14));
-            player.invincible = 90;
-            spawnParticles(game.particles, player.x, player.y, '#ff3333', 14);
-            if (player.health <= 0) gameOver();
+          const shieldedAtImpact = hasActiveShield(arsenal.weapon, now);
+          if (shieldedAtImpact && !enemy.subBoss) {
+            enemy.health = Math.max(0, enemy.health - Math.max(55, enemy.maxHealth * 1.5));
+            killEnemy(enemy, false);
+          } else {
+            enemy.alive = false;
+            pixelBurst(game.particles, enemy.x, enemy.y, enemy.color ?? COLORS[enemy.behavior], 30);
           }
+          applyPlayerDamage(enemy.subBoss ? 38 : enemy.behavior === 'TANK' ? 42 : 36);
         }
       }
       game.enemies = game.enemies.filter((enemy) => enemy.alive);
@@ -1134,8 +1184,16 @@ function Home() {
       for (const bullet of game.bullets) {
         if (!canAttack()) break;
         if (!bullet.alive) continue;
+        const intercepted = game.enemyBullets.find((shot) => shot.alive && !shot.indestructible &&
+          playerShotHitsTarget(bullet, shot));
+        if (intercepted) {
+          bullet.alive = false;
+          intercepted.alive = false;
+          spawnParticles(game.particles, intercepted.x, intercepted.y, '#b8f6ff', 4, 1, 4);
+          continue;
+        }
         if (bullet.freeze) {
-          const hitShot = game.enemyBullets.find((shot) => shot.alive && !shot.frozenUntil &&
+          const hitShot = game.enemyBullets.find((shot) => shot.alive && !shot.indestructible && !shot.frozenUntil &&
             Math.hypot(shot.x - bullet.x, shot.y - bullet.y) < shot.radius + bullet.radius);
           if (hitShot) { splash(bullet.x, bullet.y); bullet.alive = false; continue; }
         }
@@ -1171,26 +1229,19 @@ function Home() {
         }
         if (bullet.alive && enemyShotHitsPlayer(bullet, player, PLAYER_W, PLAYER_H)) {
           bullet.alive = false;
-          if (canPlayerTakeDamage(player.invincible, arsenal.weapon.shieldUntil, now, damageProtected(), bullet.piercesInvulnerability)) {
-            player.health = Math.max(0, player.health - bullet.damage); player.invincible = 90;
-            spawnParticles(game.particles, player.x, player.y, '#ff3333', 14);
-            if (player.health <= 0) gameOver();
-          }
+          applyPlayerDamage(bullet.damage);
         }
       }
       const sweepHitBeam = game.bossBeams.find((beam) =>
         !beam.playerHit && bossSweepHitsPlayer(beam, player, now, PLAYER_W, PLAYER_H));
-      if (sweepHitBeam &&
-        canPlayerTakeDamage(player.invincible, arsenal.weapon.shieldUntil, now, damageProtected(), true) &&
+      if (sweepHitBeam && !damageProtected() &&
         claimBossSweepDamage(sweepHitBeam)) {
-        player.health = Math.max(0, player.health - 16);
-        player.invincible = 90;
-        spawnParticles(game.particles, player.x, player.y, '#ff5577', 14);
-        if (player.health <= 0) gameOver();
+        applyPlayerDamage(16, '#ff5577');
       }
       if (canAttack()) {
         for (const pickup of arsenal.drops) {
-          if (advancePickup(pickup, player, now, delta / 60, H)) receivePickup(pickup.type);
+          const collectAllowed = !isWeaponPickup(pickup.type) || now >= arsenal.weapon.weaponSwitchUntil;
+          if (advancePickup(pickup, player, now, delta / 60, H, collectAllowed)) receivePickup(pickup.type);
         }
       }
       arsenal.drops = arsenal.drops.filter((drop) => drop.alive && drop.expiresAt > now);
@@ -1240,16 +1291,7 @@ function Home() {
         drawPlayer(ctx, game.player.x, game.player.y, game.player.frame, showPlayer, game.player.health);
         const arsenal = arsenalRef.current;
         if (showPlayer) drawWeaponEffects(ctx, arsenal.weapon, game.player, game.bullets, arsenal.beam,
-          arsenal.drops, gameNow() / 1000, arsenal.bombUntil, arsenal.splashes);
-       if (showPlayer && game.player.invincible > 0) {
-         ctx.save();
-         ctx.strokeStyle = `rgba(0, 255, 200, ${.45 + .22 * Math.sin(game.frame * .24)})`;
-         ctx.lineWidth = 2;
-         ctx.beginPath();
-         ctx.ellipse(game.player.x, game.player.y, 25, 33, 0, 0, Math.PI * 2);
-         ctx.stroke();
-         ctx.restore();
-       }
+          arsenal.drops, gameNow() / 1000, arsenal.bombUntil, arsenal.splashes, arsenal.shieldBlastUntil);
         if (game.state === 'PLAYING' || game.state === 'BOSS' || game.state === 'BOSS_INTRO') drawJoystick(ctx, joystickRef.current);
     };
     const testMode = (window as Window & {
@@ -1281,8 +1323,11 @@ function Home() {
           spawnSubBoss: () => spawnSubBoss(readReactiveTrack(gameRef.current.bossReactive)),
           addDrop: (type, x, y) => addDrop(type, x, y),
           clearPlayerShots: () => { gameRef.current.bullets = []; },
-          makeEnemyShot: (x, y, damage) => {
-            gameRef.current.enemyBullets.push(createEnemyProjectile(x, y, 0, 0, damage, 'ORB'));
+          makeEnemyShot: (x, y, damage, indestructible = false) => {
+            gameRef.current.enemyBullets.push({
+              ...createEnemyProjectile(x, y, 0, 0, damage, 'ORB'),
+              indestructible,
+            });
           },
           freezeAt: splash,
           endRun: gameOver,
@@ -1473,6 +1518,15 @@ function Home() {
                   <div className="truncate font-mono text-[9px] text-orange-200">L{boss.level} <span data-testid={boss.id === bossHud.at(-1)?.id ? 'text-boss-health' : undefined}>{boss.health === 0 ? 'down' : bossHud.length === 1 ? `${Math.ceil(boss.health)} / ${boss.maxHealth}` : `${Math.ceil(boss.health / boss.maxHealth * 100)}%`}</span></div>
                   <div className="boss-health"><div style={{ width: `${boss.health / boss.maxHealth * 100}%` }} /></div>
                 </div>)}</div>
+              </div>}
+              {combatHud.weapon.shieldUntil > combatHud.now && combatHud.weapon.shieldHP > 0 && <div className="mb-2" data-testid="hud-shield">
+                <div className="mb-1 flex justify-between font-mono text-[9px] uppercase text-cyan-200">
+                  <span>Shield tier {combatHud.weapon.shieldTier}</span>
+                  <span data-testid="text-shield-health">{combatHud.weapon.shieldHP} / {combatHud.weapon.shieldMaxHP} HP · {Math.ceil(combatHud.weapon.shieldUntil - combatHud.now)}s</span>
+                </div>
+                <div className="shield-health" role="meter" aria-label={`Shield health: ${combatHud.weapon.shieldHP} of ${combatHud.weapon.shieldMaxHP}`}>
+                  <div style={{ width: `${combatHud.weapon.shieldHP / combatHud.weapon.shieldMaxHP * 100}%` }} />
+                </div>
               </div>}
               <p className="controller-status mb-2" data-testid="controller-status" aria-live="polite"><Gamepad2 className="h-3 w-3 shrink-0" />{controllerStatus}</p>
               <div className="flex items-end justify-between gap-2"><div className="hull-status"><div className="mb-1 font-mono text-[8px] uppercase tracking-[.16em] text-slate-400">Hull integrity</div><div className={`whitespace-nowrap font-mono text-2xl font-bold ${hud.health <= 25 ? 'text-red-300' : hud.health <= 50 ? 'text-orange-300' : 'text-green-300'}`} data-testid="status-health">{hud.health} <span className="text-xs font-normal text-slate-400">/ {PLAYER_MAX_HEALTH}</span></div></div><div className="steering-hint flex items-center gap-2 font-mono text-[9px] uppercase tracking-[.14em] text-cyan-300/60"><Gamepad2 className="h-3 w-3" /> Touch, stick, or D-pad</div></div>

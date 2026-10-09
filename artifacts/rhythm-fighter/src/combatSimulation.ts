@@ -76,7 +76,7 @@ export function advanceSeekerProjectiles(
 export function firePattern(
   bullets: EnemyBulletEntity[], x: number, y: number, player: Pick<PlayerEntity, 'x' | 'y'>,
   pattern: AttackPattern, kind: ProjectileKind, speed: number, damage: number, serial: number, ownerId?: number,
-  piercesInvulnerability = false,
+  indestructible = false,
 ) {
   if (bullets.length >= 260) return;
   const aim = Math.atan2(player.y - y, player.x - x);
@@ -86,7 +86,7 @@ export function firePattern(
         ...createEnemyProjectile(x, y, Math.cos(angle) * speed * speedScale,
           Math.sin(angle) * speed * speedScale, damage, kind),
         ownerId,
-        piercesInvulnerability,
+        indestructible,
       });
     }
   };

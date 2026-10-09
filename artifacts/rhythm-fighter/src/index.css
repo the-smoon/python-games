@@ -363,6 +363,19 @@
   transition: width .12s linear;
 }
 
+.shield-health {
+  height: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(76,230,255,.62);
+  background: rgba(76,230,255,.1);
+}
+
+.shield-health > div {
+  height: 100%;
+  background: linear-gradient(90deg, #4ce6ff, #bc8cff);
+  transition: width .12s linear;
+}
+
 .state-overlay {
   position: absolute;
   inset: 0;

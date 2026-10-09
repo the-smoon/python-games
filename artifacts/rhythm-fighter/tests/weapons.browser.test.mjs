@@ -14,7 +14,7 @@ function silentWav() {
   wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(16000, 40);
   return wav;
 }
-test('real pickups drive ranked weapons, shield, companions, freeze, piercing laser, bombs and replay', { timeout: 60000 }, async () => {
+test('real pickups drive rank-seven weapons, shield, freeze, laser, bombs and replay', { timeout: 60000 }, async () => {
   const executablePath = process.env.CHROMIUM_PATH || execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim();
   const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
   try {
@@ -39,8 +39,8 @@ test('real pickups drive ranked weapons, shield, companions, freeze, piercing la
     };
     await run(() => window.__AUDIOSTRIKE_TEST__.clearArena());
     assert.equal((await snap()).weapon.rank, 1);
-    for (let i = 0; i < 5; i++) await pickup('TWIN');
-    assert.equal((await snap()).weapon.rank, 5);
+    for (let i = 0; i < 6; i++) await pickup('TWIN');
+    assert.equal((await snap()).weapon.rank, 7);
     assert.deepEqual((await snap()).weapon.companions, [WEAPON_BALANCE.companionHP, WEAPON_BALANCE.companionHP]);
     assert.match(await page.getByTestId('hud-weapon').innerText(), /Wingmen\s*2\/2/);
     await run(() => {
@@ -53,25 +53,37 @@ test('real pickups drive ranked weapons, shield, companions, freeze, piercing la
       api.enemyShot(p.x - 33, p.y + 8, 100);
     }); await tick();
     assert.equal((await snap()).weapon.companions[0], 0, 'wingmen remain destructible');
+    await run(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ health: 30 }));
     await pickup('TWIN');
-    assert.deepEqual((await snap()).weapon.companions, [WEAPON_BALANCE.companionHP, WEAPON_BALANCE.companionHP]);
-    await run(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ health: 30, invincible: 0 }));
+    assert.deepEqual((await snap()).weapon.companions, [0, 90], 'rank-seven weapon drops convert instead of restoring weapons');
+    assert.equal((await snap()).playerHealth, 40, 'a converted weapon drop restores ten hull');
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__;
+      api.setWeapon({ type: 'TWIN', rank: 1, weaponSwitchUntil: 0, companions: [0, 0] });
+      api.setPlayer({ health: 30 });
+    });
     await pickup('SPREAD');
-    assert.equal((await snap()).playerHealth, 70, 'lost ranks become hull repair');
+    assert.equal((await snap()).playerHealth, 30, 'switching preserves hull without granting repair');
     assert.deepEqual((await snap()).weapon.companions, [0, 0]);
     assert.equal((await snap()).weapon.rank, 1);
-    await pickup('REPAIR'); assert.equal((await snap()).playerHealth, 95);
+    assert.ok((await snap()).weapon.weaponSwitchUntil > (await snap()).now);
+    await pickup('REPAIR'); assert.equal((await snap()).playerHealth, 55);
+    await pickup('REPAIR'); assert.equal((await snap()).playerHealth, 80);
     await pickup('REPAIR'); assert.equal((await snap()).playerHealth, 100);
     await pickup('RAPID'); await pickup('SHIELD');
     const shieldUntil = (await snap()).weapon.shieldUntil;
+    assert.equal((await snap()).weapon.shieldHP, WEAPON_BALANCE.shieldTierHP[1]);
+    assert.ok(await page.getByTestId('hud-shield').isVisible());
     await run(() => {
       const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
-      api.enemyShot(p.x, p.y, 40);
+      api.enemyShot(p.x, p.y, 5);
     }); await tick();
     assert.equal((await snap()).playerHealth, 100, 'shield blocks incoming damage');
-    await tick(6100);
+    assert.equal((await snap()).weapon.shieldHP, WEAPON_BALANCE.shieldTierHP[1] - 5);
+    await tick((shieldUntil - (await snap()).now) * 1000 + 100);
     assert.ok((await snap()).now >= shieldUntil);
     assert.doesNotMatch(await page.getByTestId('hud-weapon').innerText(), /Shield/);
+    assert.equal((await snap()).weapon.shieldHP, 0);
     await run(() => {
       const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
       api.enemyShot(p.x, p.y, 5);
@@ -81,6 +93,7 @@ test('real pickups drive ranked weapons, shield, companions, freeze, piercing la
     assert.doesNotMatch(await page.getByTestId('hud-weapon').innerText(), /Rapid/);
 
     // Collecting a same-type drop refreshes the firing schedule; set the next volley to tenth.
+    await run(() => window.__AUDIOSTRIKE_TEST__.setWeapon({ weaponSwitchUntil: 0 }));
     await pickup('SPREAD');
     await run(() => {
       const api = window.__AUDIOSTRIKE_TEST__;
@@ -97,7 +110,9 @@ test('real pickups drive ranked weapons, shield, companions, freeze, piercing la
     assert.ok(frozen.enemies[0].frozenUntil > frozen.now, 'enemy within splash is slowed');
     const frozenShot = frozen.enemyShots.find((s) => s.frozenUntil);
     // Move to a different weapon to prevent another tenth freeze from refreshing this fixture.
-    await pickup('TWIN');
+    await run(() => window.__AUDIOSTRIKE_TEST__.setWeapon({
+      type: 'TWIN', rank: 2, weaponSwitchUntil: 0, nextFireAt: 0, volley: 0,
+    }));
     await tick(2000);
     const held = (await snap()).enemyShots.find((s) => s.frozenUntil);
     assert.equal(held.x, frozenShot.x); assert.equal(held.y, frozenShot.y);
@@ -127,13 +142,13 @@ test('real pickups drive ranked weapons, shield, companions, freeze, piercing la
     });
     await tick(550);
     const lased = await snap();
-    assert.equal(lased.enemies[0].health, 905); assert.equal(lased.enemies[1].health, 905);
+    assert.equal(lased.enemies[0].health, 850); assert.equal(lased.enemies[1].health, 850);
     assert.equal(lased.enemies[2].health, 1000);
     assert.equal(lased.hostileShots, 1, 'laser clears the aligned hostile bullet and leaves the off-axis bullet');
     const cooling = lased.weapon.cooldownUntil;
     assert.ok(cooling > lased.now);
     await tick(100);
-    assert.equal((await snap()).enemies[0].health, 905, 'fading beam does not repeat damage');
+    assert.equal((await snap()).enemies[0].health, 850, 'fading beam does not repeat damage');
     await pickup('LASER');
     assert.equal((await snap()).weapon.rank, 2);
     await page.screenshot({ path: '/tmp/rhythmfighter-weapons-portrait.png' });

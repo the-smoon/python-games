@@ -8,7 +8,7 @@ import {
   disruptEnemies, castBossAbility, advanceBlasts, advanceBossSweepBeams, bossSweepHitsPlayer, claimBossSweepDamage,
   bossSweepPosition, blastMovementField, BLAST_CHARGE_SECONDS, BOSS_SWEEP_TELEGRAPH_SECONDS,
 } from '../src/bossAbilities.ts';
-import { fireWeapon, newWeaponState, pickDrop, WEAPON_BALANCE } from '../src/weaponRules.ts';
+import { fireWeapon, newWeaponState, pickDrop, weaponStats, WEAPON_BALANCE } from '../src/weaponRules.ts';
 import { createPlaybackWindow, playbackTimeForElapsed, setPlaybackWindow } from '../src/playbackClips.ts';
 
 const signal = { rms: .5, onset: .3, low: .8, mid: .2, high: .05, centroid: .15, flatness: .1, pulse: true, tempo: 120 };
@@ -19,14 +19,14 @@ const enemy = () => ({ x: 150, y: 200, radius: 18, speed: 5, frame: 0, formX: 15
 const world = () => ({ enemies: [enemy()], player: { x: 210, y: 600, vx: 0, vy: 0 }, blasts: [], bossBeams: [], particles: [], debris: [], shockwaves: [] });
 const simulation = new FrameCombatSimulation({ width: 420, height: 900, playerWidth: 20, playerHeight: 32, maxSpeed: 6.875, acceleration: .42, deceleration: .55 });
 
-test('direct boss BOLT shots are marked as piercing lasers, without changing regular projectile hits', () => {
+test('boss attack projectiles stay indestructible while ordinary enemy shots can be destroyed', () => {
   const bossLaser = [];
   firePattern(bossLaser, 100, 100, { x: 100, y: 500 }, 'TRACK', 'BOLT', 8, 8, 0, 7, true);
   assert.equal(bossLaser.length, 1);
-  assert.equal(bossLaser[0].piercesInvulnerability, true);
+  assert.equal(bossLaser[0].indestructible, true);
   const ordinary = [];
   firePattern(ordinary, 100, 100, { x: 100, y: 500 }, 'TRACK', 'BOLT', 8, 8, 0, 7);
-  assert.equal(ordinary[0].piercesInvulnerability, false);
+  assert.notEqual(ordinary[0].indestructible, true);
 });
 
 test('song blueprints are stable and contrasting songs create different clean shape/palette identities', () => {
@@ -250,31 +250,24 @@ test('automatic boss attacks use blast zones more often than alternate abilities
   assert.equal(casts.filter(kind => kind !== 'BLAST').length, 2);
 });
 
-test('Rank 5 weapons have comparable boss damage with different strengths; companions are stronger and durable', () => {
-  const damageRates = {};
+test('all weapon families gain steep rank-six and rank-seven power; rank-seven twin companions remain durable', () => {
   for (const type of ['TWIN', 'SPREAD', 'LASER']) {
-    const state = newWeaponState(); state.type = type; state.rank = 5;
-    if (type === 'TWIN') state.companions = [WEAPON_BALANCE.companionHP, WEAPON_BALANCE.companionHP];
-    let damage = 0;
-    for (let frame = 0; frame < 6000; frame++) {
-      const result = fireWeapon(state, { x: 210, y: 600, vx: 0, vy: 0 }, frame / 600);
-      if (result.beam) damage += result.beam.damage;
-      for (const shot of result.shots) {
-        const x = shot.x + shot.vx / -shot.vy * 250;
-        if (Math.abs(x - 210) <= 55) damage += shot.damage;
-      }
-    }
-    damageRates[type] = damage / 10;
+    const amount = (rank) => {
+      const stats = weaponStats(type, rank);
+      return type === 'LASER' ? stats.laserDamage : stats.damage;
+    };
+    assert.ok(amount(1) > 0, `${type} has useful rank-one damage`);
+    assert.ok(amount(6) > amount(5) * 1.5, `${type} gains a large rank-six increase`);
+    assert.ok(amount(7) > amount(6) * 1.4, `${type} gains another large rank-seven increase`);
+    assert.ok(amount(7) > amount(5) * 2, `${type} has exponentially improved top-rank damage`);
   }
-  assert.ok(Object.values(damageRates).every(d => d > 150), JSON.stringify(damageRates));
-  assert.ok(Math.max(...Object.values(damageRates)) / Math.min(...Object.values(damageRates)) < 1.5, JSON.stringify(damageRates));
   assert.ok(WEAPON_BALANCE.companionHP >= 80);
-  const state = newWeaponState(); state.rank = 5; state.companions = [90, 90];
+  const state = newWeaponState(); state.rank = 7; state.companions = [90, 90];
   const shots = fireWeapon(state, { x: 210, y: 600, vx: 0, vy: 0 }, 0).shots;
   assert.ok(shots.at(-1).damage >= shots[0].damage * 2);
 });
 
-test('repair represents only two percent of random drops and no weapon emits free repairs', () => {
+test('regular repair remains a rare two-percent drop and no weapon emits free repairs', () => {
   const repairs = Array.from({ length: 1000 }, (_, i) => pickDrop(i / 1000)).filter(d => d === 'REPAIR').length;
   assert.equal(repairs, 20);
   assert.ok(WEAPON_BALANCE.bossRepairChance > 0 && WEAPON_BALANCE.bossRepairChance <= .15);

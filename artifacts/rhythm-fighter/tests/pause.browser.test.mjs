@@ -44,7 +44,7 @@ test('touch and keyboard pause preserve stage, crossfade, boss, and weapon timin
     await page.evaluate(() => {
       const api = window.__AUDIOSTRIKE_TEST__;
       api.clearArena();
-      api.setPlayer({ invincible: 1e9 });
+      api.setPlayer({ health: 100000 });
       api.drop('RAPID');
     });
     await page.clock.runFor(50);

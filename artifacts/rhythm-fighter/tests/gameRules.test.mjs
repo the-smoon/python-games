@@ -2,19 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   advanceBossDeath, advanceProjectiles, attackInterval, attackVectors, bossPhase, BOSS_TRANSITION_SECONDS, configureGameplayAudio, detachSubBoss, encounterSignature, nextLevel,
-  canPlayerTakeDamage, damageBoss, enemyShotHitsPlayer, moveBoss, playerShotHitsTarget,
+  damageBoss, enemyShotHitsPlayer, moveBoss, playerShotHitsTarget,
   spawnPressure, stageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS,
   BOSS_ENCOUNTER_SECONDS, advanceEncounter, encounterProgress, newestLivingBoss, separateBossPositions,
 } from '../src/gameRules.ts';
 import { bossHealth } from '../src/encounterRules.ts';
-
-test('only designated piercing boss attacks bypass temporary invulnerability', () => {
-  assert.equal(canPlayerTakeDamage(12, 0, 1, false), false, 'ordinary damage respects hit invulnerability');
-  assert.equal(canPlayerTakeDamage(12, 0, 1, false, true), true, 'designated boss hazards pierce hit invulnerability');
-  assert.equal(canPlayerTakeDamage(0, 2, 1, false, true), false, 'a shield still blocks piercing damage');
-  assert.equal(canPlayerTakeDamage(0, 0, 1, true, true), false, 'transition protection still blocks piercing damage');
-  assert.equal(canPlayerTakeDamage(0, 0, 1, false), true, 'ordinary damage resumes when invulnerability expires');
-});
 
 test('encounters advance exactly once on early defeat or exact gameplay timeout', () => {
   assert.equal(BOSS_ENCOUNTER_SECONDS, 30);

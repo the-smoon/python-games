@@ -54,7 +54,7 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
     await page.evaluate(() => {
       const api = window.__AUDIOSTRIKE_TEST__;
       api.clearArena();
-      api.setPlayer({ x: 300, y: 600, vx: 0, vy: 0, invincible: 1e9 });
+      api.setPlayer({ x: 300, y: 600, vx: 0, vy: 0, health: 100000 });
       api.spawnTarget(100, 150, 1e9, false, 0, 1e9, 'SEEKER');
     });
     await page.clock.runFor(100);
@@ -70,7 +70,7 @@ test('continuous stages keep stars moving, reuse both tracks, and scale the next
     await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.clearArena());
 
     await page.evaluate(() => {
-      window.__AUDIOSTRIKE_TEST__.setPlayer({ invincible: 1e9 });
+      window.__AUDIOSTRIKE_TEST__.setPlayer({ health: 100000 });
       window.__AUDIOSTRIKE_TEST__.spawnTarget(80, 150, 1e9, false, .001, 30);
     });
     const survivor = (state) => state.enemies.find((enemy) => !enemy.subBoss && enemy.health > 1e8);
@@ -173,7 +173,7 @@ test('timed encounters stack, preserve playlist ownership, pause, pickups, and i
     await page.getByTestId('button-analyze').click();
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
     const snapshot = () => page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot());
-    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ invincible: 1e9 }));
+    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ health: 100000 }));
     async function arrive() {
       await page.clock.fastForward(30100);
       assert.equal((await snapshot()).state, 'BOSS_INTRO');
@@ -244,7 +244,7 @@ test('timed encounters stack, preserve playlist ownership, pause, pickups, and i
     assert.equal(early.damageProtected, true);
     await page.evaluate(() => {
       const api = window.__AUDIOSTRIKE_TEST__;
-      api.setPlayer({ health: 50, invincible: 0 });
+      api.setPlayer({ health: 50 });
       api.drop('REPAIR');
       const p = api.snapshot().player;
       api.enemyShot(p.x, p.y, 50);
@@ -262,19 +262,19 @@ test('timed encounters stack, preserve playlist ownership, pause, pickups, and i
     assert.equal((await snapshot()).bosses[0].health, oldHealth - 180, 'bomb damages living carried boss during another death');
     assert.equal((await snapshot()).level, 3);
     assert.equal((await snapshot()).damageProtected, true, 'bomb does not cancel transition protection');
-    for (const type of ['SHIELD', 'RAPID', 'SPREAD', 'SPREAD', 'LASER', 'TWIN']) {
+    for (const type of ['SHIELD', 'RAPID', 'SPREAD']) {
       await page.evaluate((type) => window.__AUDIOSTRIKE_TEST__.drop(type), type);
       await page.clock.runFor(40);
       assert.equal((await snapshot()).drops.length, 0, `${type} pickup collects during death animation`);
     }
-    assert.equal((await snapshot()).weapon.type, 'TWIN');
+    assert.equal((await snapshot()).weapon.type, 'SPREAD');
     assert.ok((await snapshot()).weapon.shieldUntil > (await snapshot()).now);
     assert.ok((await snapshot()).weapon.rapidUntil > (await snapshot()).now);
     assert.ok((await snapshot()).bosses.some((boss) => boss.id === second.id && boss.phase === 'DYING'));
     await page.clock.runFor(2600);
     assert.equal((await snapshot()).bosses.length, 1, 'only the individually finished death is removed');
     assert.equal((await snapshot()).level, 3, 'animation completion cannot advance again');
-    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ invincible: 1e9 }));
+    await page.evaluate(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ health: 100000 }));
     const third = await arrive();
     await timeout();
     assert.equal((await snapshot()).level, 4);

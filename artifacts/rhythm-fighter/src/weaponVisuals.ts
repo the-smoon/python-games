@@ -36,7 +36,7 @@ export function drawFrozenHalo(ctx: CanvasRenderingContext2D, x: number, y: numb
 export function drawWeaponEffects(
   ctx: CanvasRenderingContext2D, weapon: WeaponState, player: { x: number; y: number },
   shots: PlayerShot[], beam: LaserBeam | null, drops: Pickup[], now: number,
-  bombUntil: number, splashes: { x: number; y: number; until: number }[],
+  bombUntil: number, splashes: { x: number; y: number; until: number }[], shieldBlastUntil: number,
 ) {
   ctx.save();
   try {
@@ -44,35 +44,45 @@ export function drawWeaponEffects(
     for (const d of drops) {
       if (!d.alive) continue;
       const info = PICKUP_INFO[d.type];
+      const locked = (d.type === 'TWIN' || d.type === 'SPREAD' || d.type === 'LASER') &&
+        weapon.weaponSwitchUntil > now;
       const left = d.expiresAt - now;
       if (left < 3 && Math.floor(now * 8) % 2 === 0) continue;
       const pulse = 1 + Math.sin(now * 6 + d.x) * .08;
       ctx.save();
       ctx.translate(d.x, d.y);
       ctx.scale(pulse, pulse);
-      ctx.fillStyle = 'rgba(7,8,15,.9)';
-      ctx.strokeStyle = info.color;
+       ctx.fillStyle = 'rgba(7,8,15,.9)';
+       ctx.strokeStyle = locked ? '#55616f' : info.color;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      if (d.type === 'REPAIR') ctx.rect(-11, -11, 22, 22);
+       if (d.type === 'REPAIR') ctx.rect(-11, -11, 22, 22);
+       else if (d.type === 'MINI_REPAIR') { ctx.moveTo(0, -14); ctx.lineTo(14, 0); ctx.lineTo(0, 14); ctx.lineTo(-14, 0); ctx.closePath(); }
       else if (d.type === 'BOMB') { ctx.moveTo(0, -14); ctx.lineTo(13, 0); ctx.lineTo(0, 14); ctx.lineTo(-13, 0); ctx.closePath(); }
-      else if (d.type === 'RAPID' || d.type === 'SHIELD') { for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; ctx.lineTo(Math.cos(a) * 13, Math.sin(a) * 13); } ctx.closePath(); }
+       else if (d.type === 'RAPID' || d.type === 'SHIELD' || d.type === 'SHIELD_2' || d.type === 'SHIELD_3') { for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; ctx.lineTo(Math.cos(a) * 13, Math.sin(a) * 13); } ctx.closePath(); }
       else ctx.arc(0, 0, 12, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = info.color;
+       ctx.fillStyle = locked ? '#65717e' : info.color;
       ctx.font = `700 ${info.glyph.length > 1 ? 10 : 13}px 'Space Mono', monospace`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(info.glyph, 0, 1);
+       if (locked) {
+         ctx.fillStyle = 'rgba(0,0,0,.72)';
+         ctx.beginPath(); ctx.arc(0, 0, 9, 0, Math.PI * 2); ctx.fill();
+         ctx.fillStyle = '#a7b1bd';
+         ctx.font = "700 7px 'Space Mono', monospace";
+         ctx.fillText('LOCK', 0, 1);
+       }
       ctx.restore();
     }
 
     // shots
     for (const s of shots) {
       if (!s.alive) continue;
-      const c = COL[s.weapon];
-      const rk = Math.min(5, 1 + Math.round((s.damage - (s.weapon === 'TWIN' ? 1 : 2.5)) / (s.weapon === 'TWIN' ? .3 : .875)));
+      const c = s.shieldBurst ? '#7ff7ff' : COL[s.weapon];
+      const rk = s.rank;
       ctx.globalAlpha = 1;
       if (s.weapon === 'SPREAD') {
         const col = s.freeze ? '#aef4ff' : c;
@@ -116,19 +126,35 @@ export function drawWeaponEffects(
     }
 
     // shield
-    if (weapon.shieldUntil > now) {
+    if (weapon.shieldUntil > now && weapon.shieldHP > 0) {
       const left = weapon.shieldUntil - now;
+      const color = weapon.shieldTier === 3 ? '#bc8cff' : weapon.shieldTier === 2 ? '#4ce6ff' : '#7cb8ff';
       if (left > 1.5 || Math.floor(now * 10) % 2 === 0) {
         const p = 1 + Math.sin(now * 8) * .04;
         ctx.save();
         ctx.translate(player.x, player.y);
         ctx.scale(p, p);
-        ctx.fillStyle = '#7cb8ff'; ctx.globalAlpha = .13;
+         ctx.fillStyle = color; ctx.globalAlpha = .13;
         ctx.beginPath(); ctx.ellipse(0, 0, 30, 36, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = .9; ctx.strokeStyle = '#9fd0ff'; ctx.lineWidth = 2.5;
+         ctx.globalAlpha = .9; ctx.strokeStyle = color; ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.ellipse(0, 0, 30, 36, 0, 0, Math.PI * 2); ctx.stroke();
         ctx.restore();
       }
+    }
+
+    if (shieldBlastUntil > now) {
+      const progress = Math.min(1, (shieldBlastUntil - now) / .38);
+      ctx.save();
+      ctx.fillStyle = `rgba(89, 230, 255, ${.24 * progress})`;
+      ctx.strokeStyle = `rgba(175, 250, 255, ${.9 * progress})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(player.x - 16, player.y - 12);
+      ctx.lineTo(player.x - 68 * progress, player.y - 86 * progress);
+      ctx.lineTo(player.x + 68 * progress, player.y - 86 * progress);
+      ctx.lineTo(player.x + 16, player.y - 12);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
     }
 
     // laser charge

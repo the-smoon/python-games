@@ -42,7 +42,6 @@ export type PlayerEntity = {
   vx: number;
   vy: number;
   health: number;
-  invincible: number;
   fireTimer: number;
   frame: number;
   debuffUntil?: number;
@@ -63,7 +62,7 @@ export type BulletEntity = PlayerShot;
 export type EnemyBulletEntity = {
   x: number; y: number; vx: number; vy: number; damage: number; alive: boolean;
   kind?: ProjectileKind; radius: number; spin?: number; frozenUntil?: number; ownerId?: number;
-  seekSecondsLeft?: number; piercesInvulnerability?: boolean;
+  seekSecondsLeft?: number; indestructible?: boolean;
 };
 export type ParticleEntity = { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; pixel?: boolean; size?: number };
 export type DebrisEntity = {
@@ -79,6 +78,7 @@ export type BossEntity = {
   vx: number; fireTimer: number; dyingTimer: number; subBossTimer: number; revision: number; frozenUntil?: number;
   color?: string; designProjectile?: ProjectileKind; secondaryAt?: number; secondaryIndex?: number;
   designSignal?: LiveFeatures; musicSection?: number; abilitySerial?: number;
+  playerCollisionUntil?: number;
 };
 export type ActiveBoss = BossEntity & {
   id: number;
@@ -113,6 +113,7 @@ export type CombatArsenal = {
   beam: LaserBeam | null;
   splashes: { x: number; y: number; until: number }[];
   bombUntil: number;
+  shieldBlastUntil: number;
   message: string;
   messageUntil: number;
   dropMisses: number;

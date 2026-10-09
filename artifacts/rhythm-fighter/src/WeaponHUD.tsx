@@ -30,13 +30,15 @@ function WeaponHUD({ weapon, now, message, messageUntil }: Props) {
       <div className="weapon-hud" data-type={weapon.type} data-testid="hud-weapon">
         <div className="weapon-name">
           <span>{NAMES[weapon.type]}</span>
-          <span data-testid="text-weapon-rank">R{weapon.rank}/5</span>
+          <span data-testid="text-weapon-rank">R{weapon.rank}/{WEAPON_BALANCE.maxRank}</span>
         </div>
         <div className="weapon-ranks" aria-hidden>
-          {[1, 2, 3, 4, 5].map((n) => <span key={n} className={`weapon-rank${n <= weapon.rank ? ' on' : ''}`} />)}
+          {Array.from({ length: WEAPON_BALANCE.maxRank }, (_, index) => index + 1)
+            .map((n) => <span key={n} className={`weapon-rank${n <= weapon.rank ? ' on' : ''}`} />)}
         </div>
         {rapid > 0 && <div className="weapon-timer rapid"><span>Rapid</span><span>{Math.ceil(rapid)}s</span></div>}
-        {shield > 0 && <div className="weapon-timer shield"><span>Shield</span><span>{Math.ceil(shield)}s</span></div>}
+        {shield > 0 && <div className="weapon-timer shield"><span>Shield T{weapon.shieldTier} · {weapon.shieldHP} HP</span><span>{Math.ceil(shield)}s</span></div>}
+        {weapon.weaponSwitchUntil > now && <div className="weapon-timer switch-lock"><span>Weapon lock</span><span>{Math.ceil(weapon.weaponSwitchUntil - now)}s</span></div>}
         {showCrew && <div className="weapon-timer crew"><span>Wingmen</span><span>{alive}/2</span></div>}
         {laser && (
           <div className={`weapon-laser ${laser.cls}`}>

@@ -20,3 +20,9 @@ Use the cached full-song `analyzedSeconds` when choosing a random playback windo
 **Why:** The user wants enemy design and clip selection to come from the full-song analysis prepared before gameplay, without an extra media load delaying or blocking playlist startup.
 
 **How to apply:** Carry the stored duration with each prepared track and choose each non-first clip window before starting the countdown; keep the first track anchored at zero.
+
+Browser cache-reuse tests should verify that analysis is reused without another write, not require a fixed number of server reads; local browser storage can satisfy some entries while the shared API serves others.
+
+**Why:** A reload may mix browser-local and server-side cache hits, so exact network-read counts can fail even when durable reuse works.
+
+**How to apply:** Assert successful cached results and no unnecessary resaves; only assert a specific request count when the test clears both cache layers first.

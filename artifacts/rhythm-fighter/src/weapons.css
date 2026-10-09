@@ -29,6 +29,7 @@
 .weapon-timer { display: flex; justify-content: space-between; }
 .weapon-timer.rapid { border-left: 2px solid #56e9ff; color: #56e9ff; }
 .weapon-timer.shield { border-left: 2px solid #7cb8ff; color: #9fd0ff; }
+.weapon-timer.switch-lock { border-left: 2px solid #8994a3; color: #b7c0cc; }
 .weapon-timer.crew { border-left: 2px solid #ffe45e; color: #ffe45e; }
 .weapon-laser { border-left: 2px solid #ee8cff; color: #f6c8ff; }
 .weapon-laser .bar { height: 4px; margin-top: 2px; background: #2a1d33; overflow: hidden; }

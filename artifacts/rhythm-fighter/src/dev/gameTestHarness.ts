@@ -4,7 +4,7 @@ import { encounterProgress } from '../gameRules';
 import type { ActiveBoss, CombatArsenal, CombatWorld, FeatureSet, PlayerEntity, ProjectileKind } from '../gameRuntimeTypes';
 import { blankLiveFeatures } from '../soundtrackLifecycle';
 import { levelPair, type LocalTrack } from '../playlistRules';
-import type { PickupType } from '../weaponRules';
+import type { PickupType, WeaponState } from '../weaponRules';
 
 type PreparedTrack = LocalTrack & { url: string; features: FeatureSet };
 type SpectrumBand = 'bass' | 'bright';
@@ -16,13 +16,17 @@ export type RhythmFighterTestApi = {
   spawnSubBoss: () => void;
   setEncounterElapsed: (seconds: number) => void;
   setBossHealth: (id: number, health: number) => void;
+  setBossFireTimer: (id: number, frames: number) => void;
   castSecondary: (id: number, kind: 'BLAST' | 'DEBUFF' | 'BUFF' | 'SWEEP') => void;
   setAudioSpectrum: (id: number, band: SpectrumBand) => void;
   drop: (type: PickupType, x?: number, y?: number) => void;
   setPlayer: (values: Partial<PlayerEntity>) => void;
   clearArena: () => void;
   spawnTarget: (x: number, y: number, health: number, subBoss?: boolean, speed?: number, fireRate?: number, projectile?: ProjectileKind) => void;
-  enemyShot: (x: number, y: number, damage?: number) => void;
+  enemyShot: (x: number, y: number, damage?: number, indestructible?: boolean) => void;
+  setWeapon: (values: Partial<WeaponState>) => void;
+  setBossPosition: (id: number, x: number, y: number) => void;
+  setBossPhase: (id: number, phase: ActiveBoss['phase']) => void;
   freezeAt: (x: number, y: number) => void;
   setVolley: (value: number) => void;
   endRun: () => void;
@@ -53,7 +57,7 @@ type HarnessRuntime = {
   spawnSubBoss: () => void;
   addDrop: (type: PickupType, x: number, y: number) => void;
   clearPlayerShots: () => void;
-  makeEnemyShot: (x: number, y: number, damage: number) => void;
+  makeEnemyShot: (x: number, y: number, damage: number, indestructible?: boolean) => void;
   freezeAt: (x: number, y: number) => void;
   endRun: () => void;
 };
@@ -124,6 +128,7 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         weapon: { ...arsenal.weapon, companions: [...arsenal.weapon.companions] },
         drops: arsenal.drops.map((drop) => ({ ...drop })),
         shots: game.bullets.map((shot) => ({ ...shot })),
+        shieldBlastUntil: arsenal.shieldBlastUntil,
         beam: arsenal.beam,
         pixelCount: game.particles.filter(p => p.pixel).length,
         debris: game.debris.map(d => ({ generation: d.generation, size: d.size })),
@@ -153,6 +158,18 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         boss.health = health;
         boss.maxHealth = Math.max(boss.maxHealth, health);
       }
+    },
+    setBossPosition: (id, x, y) => {
+      const boss = runtime.getEncounters().findBoss(id);
+      if (boss) { boss.x = x; boss.y = y; boss.playerCollisionUntil = 0; }
+    },
+    setBossPhase: (id, phase) => {
+      const boss = runtime.getEncounters().findBoss(id);
+      if (boss) boss.phase = phase;
+    },
+    setBossFireTimer: (id, frames) => {
+      const boss = runtime.getEncounters().findBoss(id);
+      if (boss) boss.fireTimer = frames;
     },
     castSecondary: (id, kind) => {
       const boss = runtime.getEncounters().findBoss(id);
@@ -200,7 +217,8 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         motionChangedAt: speed ? Infinity : runtime.gameNow() / 1000, pattern: 'TRACK',
       });
     },
-    enemyShot: (x, y, damage = 5) => runtime.makeEnemyShot(x, y, damage),
+    enemyShot: (x, y, damage = 5, indestructible = false) => runtime.makeEnemyShot(x, y, damage, indestructible),
+    setWeapon: (values) => Object.assign(runtime.getArsenal().weapon, values),
     freezeAt: (x, y) => runtime.freezeAt(x, y),
     setVolley: (value) => { runtime.getArsenal().weapon.volley = value; },
     endRun: runtime.endRun,

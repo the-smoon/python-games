@@ -57,7 +57,7 @@ test('boss blast and safe-lane laser damage through temporary invulnerability', 
     const blast = state.blasts.find(item => item.kind === 'BLAST' && !item.detonated);
     assert.ok(blast, 'the boss creates a delayed blast');
     await page.clock.runFor(Math.max(0, (blast.explodeAt - state.now + .12) * 1000));
-    assert.equal((await snapshot()).playerHealth, 82, 'the blast damages the player despite hit-invulnerability');
+    assert.equal((await snapshot()).playerHealth, 82, 'the blast damages the hull without any hit-invulnerability window');
 
     await page.evaluate(id => {
       const api = window.__AUDIOSTRIKE_TEST__;
@@ -72,7 +72,7 @@ test('boss blast and safe-lane laser damage through temporary invulnerability', 
     const progressAtPlayer = Math.max(0, Math.min(1, (760 - beam.startY) / (beam.endY - beam.startY)));
     const playerCrossingAt = beam.activeAt + progressAtPlayer * (beam.endsAt - beam.activeAt);
     await page.clock.runFor(Math.max(0, (playerCrossingAt - state.now + .18) * 1000));
-    assert.equal((await snapshot()).playerHealth, 84, 'the beam damages outside its safe lane despite hit-invulnerability');
+    assert.equal((await snapshot()).playerHealth, 84, 'the beam damages the hull outside its safe lane');
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();
