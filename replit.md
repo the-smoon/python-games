@@ -7,12 +7,16 @@ it as part of unrelated work.
 
 ## Music library and owner access
 
-The API server reads the existing `AUDIOSTRIKE_MUSIC_FOLDER_ID`,
-`AUDIOSTRIKE_OWNER_PASSWORD`, and `SESSION_SECRET` settings. Keep these names
-and their current values. Shared playlists live in the existing `AudioStrike
-Playlists` child folder in Google Drive, and owner sessions keep the
-`audiostrike_owner` cookie name. Renaming these compatibility identifiers
-would disconnect saved data or existing sign-in configuration.
+The API server reads the existing `AUDIOSTRIKE_MUSIC_FOLDER_ID` and
+`SESSION_SECRET` settings. Owner uploads use Google OAuth configured with
+`AUDIOSTRIKE_GOOGLE_CLIENT_ID` and `AUDIOSTRIKE_GOOGLE_CLIENT_SECRET` in Secrets;
+only the verified account `danielsampson40@gmail.com` can upload. Register
+`https://<Replit host>/api/playlists/owner/google/callback` as an authorized
+redirect URI for each trusted Replit host. Shared playlists stay anonymous and
+live in the existing `AudioStrike Playlists` child folder in Google Drive.
+Owner sessions keep the `audiostrike_owner` cookie name. The old
+`AUDIOSTRIKE_OWNER_PASSWORD` secret is not used for sign-in; do not remove it
+until the Google owner sign-in and upload flow is verified.
 
 ## Checks
 

@@ -145,22 +145,7 @@ paths:
       operationId: getOwnerStatus
       responses:
         "200":
-          description: Owner session status
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OwnerStatus"
-    post:
-      operationId: ownerSignIn
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OwnerLoginInput"
-      responses:
-        "200":
-          description: Owner session created
+          description: Owner session and whether Google OAuth is configured
           content:
             application/json:
               schema:
@@ -170,6 +155,57 @@ paths:
       responses:
         "204":
           description: Signed out
+  /playlists/owner/google:
+    get:
+      operationId: beginOwnerGoogleSignIn
+      parameters:
+        - name: returnTo
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: ["/", "/audiostrike-legacy/"]
+      responses:
+        "302":
+          description: Redirect to Google for owner authentication
+          headers:
+            Location:
+              schema:
+                type: string
+        "400":
+          description: Invalid return path
+        "429":
+          description: Sign-in attempt limit reached
+        "503":
+          description: Google OAuth is not configured for this app address
+  /playlists/owner/google/callback:
+    get:
+      operationId: completeOwnerGoogleSignIn
+      parameters:
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "303":
+          description: Redirect back to the app after owner authentication
+          headers:
+            Location:
+              schema:
+                type: string
+        "400":
+          description: Missing, forged, or expired OAuth state
   /playlists/upload:
     post:
       operationId: uploadOwnerMp3
@@ -348,13 +384,6 @@ components:
           maxItems: 20
           items:
             $ref: "#/components/schemas/DriveTrack"
-    OwnerLoginInput:
-      type: object
-      required: [password]
-      properties:
-        password:
-          type: string
-          maxLength: 256
     OwnerStatus:
       type: object
       required: [owner, configured]

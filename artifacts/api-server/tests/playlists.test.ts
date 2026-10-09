@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createSign, generateKeyPairSync } from "node:crypto";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import express from "express";
@@ -112,42 +113,162 @@ test("Drive failures are actionable and never expose provider response or author
   const missing = new DriveLibrary(async () => { throw new Error("secret token"); }, "music");
   await assert.rejects(() => missing.library(), /unavailable or timed out/);
 });
-test("owner upload requires signed cookie; invalid login, forged cookie and cross-origin blocked", async () => {
-  process.env.AUDIOSTRIKE_OWNER_PASSWORD = "test-only-owner-password";
+test("Google OIDC limits uploads to the verified owner and leaves shared music anonymous", async () => {
+  const envKeys = ["SESSION_SECRET", "AUDIOSTRIKE_GOOGLE_CLIENT_ID", "AUDIOSTRIKE_GOOGLE_CLIENT_SECRET"] as const;
+  const previousEnv = new Map(envKeys.map((key) => [key, process.env[key]]));
   process.env.SESSION_SECRET = "test-only-session-key";
-  const drive = fakeDrive(), app = express();
+  process.env.AUDIOSTRIKE_GOOGLE_CLIENT_ID = "test-google-client-id";
+  process.env.AUDIOSTRIKE_GOOGLE_CLIENT_SECRET = "test-google-client-secret";
+
+  const ownerKey = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const attackerKey = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const jwk = { ...ownerKey.publicKey.export({ format: "jwk" }), kid: "google-test-key", use: "sig", alg: "RS256" };
+  let clock = Date.now();
+  const tokens = new Map<string, { nonce: string; claims?: Record<string, unknown>; key?: typeof ownerKey.privateKey }>();
+  const mintIdToken = (nonce: string, overrides: Record<string, unknown> = {}, key = ownerKey.privateKey) => {
+    const now = Math.floor(clock / 1000);
+    const header = Buffer.from(JSON.stringify({ alg: "RS256", kid: "google-test-key", typ: "JWT" })).toString("base64url");
+    const claims = Buffer.from(JSON.stringify({
+      iss: "https://accounts.google.com", aud: "test-google-client-id", sub: "google-owner-subject",
+      exp: now + 300, iat: now, nonce, email: "DanielSampson40@gmail.com", email_verified: true, ...overrides,
+    })).toString("base64url");
+    const signingInput = `${header}.${claims}`;
+    const signer = createSign("RSA-SHA256");
+    signer.update(signingInput); signer.end();
+    return `${signingInput}.${signer.sign(key).toString("base64url")}`;
+  };
+  const oauthFetch: typeof fetch = async (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    if (url.href === "https://oauth2.googleapis.com/token") {
+      const form = new URLSearchParams(String(init?.body));
+      assert.equal(form.get("client_id"), "test-google-client-id");
+      assert.equal(form.get("client_secret"), "test-google-client-secret");
+      assert.equal(form.get("grant_type"), "authorization_code");
+      assert.equal(form.get("redirect_uri"), "https://rhythm-fighter.test/api/playlists/owner/google/callback");
+      assert.ok(form.get("code_verifier"), "authorization code exchange must use PKCE");
+      const data = tokens.get(form.get("code") ?? "");
+      assert.ok(data, "only the test authorization codes should reach Google");
+      return Response.json({ id_token: mintIdToken(data.nonce, data.claims, data.key) });
+    }
+    if (url.href === "https://www.googleapis.com/oauth2/v3/certs") {
+      return Response.json({ keys: [jwk] }, { headers: { "cache-control": "public, max-age=3600" } });
+    }
+    throw new Error("Unexpected OAuth request");
+  };
+  const drive = fakeDrive();
+  const app = express();
   app.use(express.json({ limit: "4kb" }));
-  app.use("/api", createPlaylistRouter(drive.library));
+  app.use("/api", createPlaylistRouter(drive.library, {
+    oauthFetch,
+    oauthRedirectUri: () => "https://rhythm-fighter.test/api/playlists/owner/google/callback",
+    now: () => clock,
+  }));
   const server = app.listen(0);
   await new Promise<void>(resolve => server.once("listening", resolve));
   const address = server.address() as { port: number }, base = `http://127.0.0.1:${address.port}/api/playlists`;
   const upload = (cookie?: string, body = mp3) => fetch(`${base}/upload`, { method: "POST",
     headers: { "Content-Type": "audio/mpeg", "X-Filename": "new.mp3", ...(cookie ? { Cookie: cookie } : {}) }, body });
+  const start = async (claims?: Record<string, unknown>, key?: typeof ownerKey.privateKey) => {
+    const response = await fetch(`${base}/owner/google?returnTo=%2F`, { redirect: "manual", headers: { "X-Forwarded-Proto": "https" } });
+    assert.equal(response.status, 302);
+    const location = new URL(response.headers.get("location")!);
+    assert.equal(location.origin, "https://accounts.google.com");
+    assert.equal(location.searchParams.get("client_id"), "test-google-client-id");
+    assert.equal(location.searchParams.get("scope"), "openid email");
+    assert.equal(location.searchParams.get("code_challenge_method"), "S256");
+    assert.ok(location.searchParams.get("code_challenge"));
+    assert.ok(!location.href.includes("test-google-client-secret"), "the client secret must never enter the browser redirect");
+    const stateCookie = response.headers.getSetCookie().find(value => value.startsWith("audiostrike_google_state="))!;
+    assert.match(stateCookie, /HttpOnly/i); assert.match(stateCookie, /Secure/i); assert.match(stateCookie, /SameSite=Lax/i);
+    const code = `test-code-${tokens.size}`;
+    tokens.set(code, { nonce: location.searchParams.get("nonce")!, claims, key });
+    return { cookie: stateCookie.split(";", 1)[0], state: location.searchParams.get("state")!, code };
+  };
+  const callback = (flow: { cookie: string; state: string; code: string }, state = flow.state) => {
+    const url = new URL(`${base}/owner/google/callback`);
+    url.searchParams.set("code", flow.code); url.searchParams.set("state", state);
+    return fetch(url, { redirect: "manual", headers: { Cookie: flow.cookie, "X-Forwarded-Proto": "https" } });
+  };
   try {
+    assert.equal((await (await fetch(`${base}/owner`)).json() as { owner: boolean; configured: boolean }).configured, true);
     assert.equal((await upload()).status, 403);
     assert.equal((await upload("audiostrike_owner=123.forged")).status, 403);
-    const wrong = await fetch(`${base}/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: "wrong" }) });
-    assert.equal(wrong.status, 401);
-    const login = await fetch(`${base}/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: process.env.AUDIOSTRIKE_OWNER_PASSWORD }) });
-    assert.equal(login.status, 200);
-    const cookie = login.headers.get("set-cookie")!;
-    assert.match(cookie, /^audiostrike_owner=/, "owner sessions must keep the established cookie name");
-    assert.match(cookie, /HttpOnly/i); assert.match(cookie, /SameSite=Strict/i);
-    const uploaded = await upload(cookie);
+    assert.notEqual((await fetch(`${base}/owner`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: "legacy-password" }) })).status, 200, "the former password login endpoint must be gone");
+
+    const ownerFlow = await start();
+    assert.equal((await callback(ownerFlow, `${ownerFlow.state.slice(0, -1)}x`)).status, 400, "a forged state must be rejected");
+    const ownerLogin = await callback(ownerFlow);
+    assert.equal(ownerLogin.status, 303);
+    assert.equal(ownerLogin.headers.get("location"), "/?ownerSignIn=success");
+    const ownerSetCookie = ownerLogin.headers.getSetCookie().find(value => value.startsWith("audiostrike_owner="))!;
+    assert.match(ownerSetCookie, /HttpOnly/i); assert.match(ownerSetCookie, /Secure/i);
+    assert.match(ownerSetCookie, /SameSite=Strict/i); assert.match(ownerSetCookie, /Max-Age=28800/i);
+    assert.match(ownerSetCookie, /Path=\/api\/playlists/i);
+    const ownerCookie = ownerSetCookie.split(";", 1)[0];
+    assert.equal((await (await fetch(`${base}/owner`, { headers: { Cookie: ownerCookie } })).json() as { owner: boolean }).owner, true);
+    const uploaded = await upload(ownerCookie);
     assert.equal(uploaded.status, 201);
     assert.equal((await uploaded.json() as { title: string }).title, "new.mp3");
-    assert.equal((await upload(cookie, Buffer.from("not mp3"))).status, 422);
-    const crossOrigin = await fetch(`${base}/upload`, { method: "POST", headers: { Cookie: cookie, Origin: "https://evil.test", "Content-Type": "audio/mpeg" }, body: mp3 });
+    assert.equal((await upload(ownerCookie, Buffer.from("not mp3"))).status, 422);
+    const crossOrigin = await fetch(`${base}/upload`, { method: "POST", headers: {
+      Cookie: ownerCookie, Origin: "https://evil.test", "Content-Type": "audio/mpeg",
+    }, body: mp3 });
     assert.equal(crossOrigin.status, 403);
-    const list = await fetch(`${base}/library`);
-    assert.equal(list.status, 200);
-    const saved = await fetch(base, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: "Public", trackIds: ["A"] }) });
+
+    for (const [claims, key] of [
+      [{ email: "someone-else@gmail.com" }, undefined],
+      [{ email_verified: false }, undefined],
+      [{}, attackerKey.privateKey],
+      [{ nonce: "not-the-issued-nonce" }, undefined],
+    ] as const) {
+      const flow = await start(claims, key);
+      const rejected = await callback(flow);
+      assert.equal(rejected.status, 303);
+      assert.equal(rejected.headers.get("location"), "/?ownerSignIn=denied");
+      const forbiddenCookie = rejected.headers.getSetCookie().find(value => value.startsWith("audiostrike_owner="));
+      assert.equal(forbiddenCookie, undefined);
+    }
+    assert.equal((await upload()).status, 403, "rejected Google identities must not obtain a session usable by direct API requests");
+
+    const logout = await fetch(`${base}/owner`, { method: "DELETE", headers: {
+      Cookie: ownerCookie, Origin: `http://127.0.0.1:${address.port}`,
+    } });
+    assert.equal(logout.status, 204);
+    assert.ok(logout.headers.getSetCookie().some(value => value.startsWith("audiostrike_owner=") &&
+      /Expires=Thu, 01 Jan 1970 00:00:00 GMT/i.test(value)));
+
+    assert.equal((await fetch(`${base}/library`)).status, 200);
+    const saved = await fetch(base, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Public", trackIds: ["A"] }) });
     assert.equal(saved.status, 201);
     const id = (await saved.json() as { id: string }).id;
     assert.equal((await fetch(`${base}/${id}`)).status, 200);
     assert.equal((await fetch(`${base}/audio/A`)).status, 200);
-    const statuses = [];
-    for (let i = 0; i < 6; i++) statuses.push((await fetch(`${base}/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"password":"wrong"}' })).status);
-    assert.ok(statuses.includes(429));
-  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+
+    const limitedApp = express();
+    limitedApp.use("/api", createPlaylistRouter(drive.library, {
+      oauthFetch, oauthRedirectUri: () => "https://rhythm-fighter.test/api/playlists/owner/google/callback",
+    }));
+    const limitedServer = limitedApp.listen(0);
+    await new Promise<void>(resolve => limitedServer.once("listening", resolve));
+    try {
+      const limitedBase = `http://127.0.0.1:${(limitedServer.address() as { port: number }).port}/api/playlists`;
+      const statuses: number[] = [];
+      for (let i = 0; i < 6; i++) statuses.push((await fetch(`${limitedBase}/owner/google?returnTo=%2F`, { redirect: "manual" })).status);
+      assert.equal(statuses.filter(status => status === 302).length, 5);
+      assert.equal(statuses[5], 429, "Google sign-in start preserves the five-per-minute limit");
+    } finally {
+      limitedServer.closeAllConnections();
+      await new Promise<void>(resolve => limitedServer.close(() => resolve()));
+    }
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    for (const key of envKeys) {
+      const value = previousEnv.get(key);
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

@@ -403,21 +403,23 @@ export const GetOwnerStatusResponse = zod.object({
 })
 
 
-export const ownerSignInBodyPasswordMax = 256;
-
-
-
-export const OwnerSignInBody = zod.object({
-  "password": zod.string().max(ownerSignInBodyPasswordMax)
-})
-
-export const OwnerSignInResponse = zod.object({
-  "owner": zod.boolean(),
-  "configured": zod.boolean()
-})
-
-
 export const OwnerSignOutResponse = zod.void()
+
+
+export const BeginOwnerGoogleSignInQueryParams = zod.object({
+  "returnTo": zod.enum(['/', '/audiostrike-legacy/'])
+})
+
+export const BeginOwnerGoogleSignInResponse = zod.void()
+
+
+export const CompleteOwnerGoogleSignInQueryParams = zod.object({
+  "state": zod.coerce.string(),
+  "code": zod.coerce.string().optional(),
+  "error": zod.coerce.string().optional()
+})
+
+export const CompleteOwnerGoogleSignInResponse = zod.void()
 
 
 export const UploadOwnerMp3Header = zod.object({

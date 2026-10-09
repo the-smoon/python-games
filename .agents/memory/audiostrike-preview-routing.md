@@ -26,3 +26,9 @@ Rhythm Fighter uses browser-native Web Audio analysis during playback rather tha
 **Why:** Local file playback stays private, and live spectral response is available on the same managed browser route used by desktop and touchscreen previews.
 
 **How to apply:** Keep stage and boss behavior driven from their active `AnalyserNode` streams; preserve the local-file flow unless server-side analysis is explicitly requested.
+
+To test the Google OAuth callback URI against the Replit host while calling the API server directly, supply the trusted Replit hostname in `X-Forwarded-Host` and use `X-Forwarded-Proto: https`.
+
+**Why:** A direct request to the local API port appears to come from `127.0.0.1` and therefore generates a localhost callback, which is not the public Replit redirect URI.
+
+**How to apply:** Keep the production host allowlist intact; set the forwarded-host headers only in direct local verification requests, or test through the managed preview proxy.

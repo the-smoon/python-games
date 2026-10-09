@@ -1,37 +1,39 @@
 import { Router, raw, type Request, type RequestHandler } from "express";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { DriveLibrary, driveLibrary, driveRequestContext, LibraryError, MAX_TRACK_BYTES } from "../lib/driveLibrary";
+import {
+  createGoogleIdentityVerifier, createOwnerSession, createSignedLoginState, exchangeGoogleCode,
+  getCookie, GOOGLE_STATE_COOKIE, GOOGLE_STATE_MS, googleOAuthConfigured, googleRedirectUri,
+  isOwner, OWNER_COOKIE, OWNER_SESSION_MS, readSignedLoginState, secureCookie, type GoogleLoginState,
+} from "../lib/googleOwnerAuth";
 
-const COOKIE = "audiostrike_owner";
-function equal(a: string, b: string) {
-  return timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest());
-}
-function sessionSecret() { return process.env.SESSION_SECRET; }
-function owner(req: Request) {
-  const secret = sessionSecret();
-  const value = req.headers.cookie?.split(";").map(v => v.trim()).find(v => v.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
-  if (!secret || !process.env.AUDIOSTRIKE_OWNER_PASSWORD || !value) return false;
-  const [expiry, signature] = value.split(".");
-  return /^\d{13}$/.test(expiry ?? "") && Number(expiry) > Date.now() && Number(expiry) <= Date.now() + 8 * 3600_000 &&
-    equal(signature ?? "", createHmac("sha256", secret).update(`${expiry}:${process.env.AUDIOSTRIKE_OWNER_PASSWORD}`).digest("hex"));
-}
-export function createPlaylistRouter(library: DriveLibrary = driveLibrary) {
+type PlaylistRouterOptions = {
+  oauthFetch?: typeof fetch;
+  oauthRedirectUri?: (req: Request) => string | null;
+  now?: () => number;
+};
+
+export function createPlaylistRouter(library: DriveLibrary = driveLibrary, options: PlaylistRouterOptions = {}) {
   const router = Router();
+  const oauthFetch = options.oauthFetch ?? fetch;
+  const now = options.now ?? Date.now;
+  const redirectUriFor = options.oauthRedirectUri ?? googleRedirectUri;
+  const verifyGoogleIdentity = createGoogleIdentityVerifier(oauthFetch, now);
   const clients = new Map<string, { since: number; requests: number; writes: number; logins: number; audio: number }>();
   let active = 0;
   let globalWriteWindow = Date.now(), globalWrites = 0;
   const limit: RequestHandler = (req, res, next) => {
-    const now = Date.now();
-    for (const [key, value] of clients) if (now - value.since >= 60_000) clients.delete(key);
+    const current = Date.now();
+    for (const [key, value] of clients) if (current - value.since >= 60_000) clients.delete(key);
     // Do not trust arbitrary X-Forwarded-For values.
     const key = req.ip ?? "unknown";
     if (!clients.has(key) && clients.size >= 1000) { res.status(429).json({ error: "Service busy. Try later." }); return; }
-    const quota = clients.get(key) ?? { since: now, requests: 0, writes: 0, logins: 0, audio: 0 };
+    const quota = clients.get(key) ?? { since: current, requests: 0, writes: 0, logins: 0, audio: 0 };
     clients.set(key, quota);
-    const login = req.path === "/owner" && req.method === "POST";
+    const login = req.path === "/owner/google" && req.method === "GET";
     const write = req.method === "POST" && !login;
     const audio = req.path.startsWith("/audio/");
-    if (now - globalWriteWindow >= 3600_000) { globalWrites = 0; globalWriteWindow = now; }
+    if (current - globalWriteWindow >= 3600_000) { globalWrites = 0; globalWriteWindow = current; }
     if (++quota.requests > 120 || (login && ++quota.logins > 5) || (write && (++quota.writes > 10 || ++globalWrites > 60)) || (audio && ++quota.audio > 40) || active >= 4) {
       res.setHeader("Retry-After", "60");
       res.status(429).json({ error: "Music library request limit reached. Try again later." }); return;
@@ -52,7 +54,7 @@ export function createPlaylistRouter(library: DriveLibrary = driveLibrary) {
     next();
   };
   const requireOwner: RequestHandler = (req, res, next) => {
-    if (!owner(req)) { res.status(403).json({ error: "Owner sign-in is required to upload music" }); return; }
+    if (!isOwner(req)) { res.status(403).json({ error: "Owner sign-in is required to upload music" }); return; }
     next();
   };
   const handle = (action: RequestHandler): RequestHandler => async (req, res, next) => {
@@ -68,20 +70,84 @@ export function createPlaylistRouter(library: DriveLibrary = driveLibrary) {
     finally { clearTimeout(timer); res.off("close", disconnect); }
   };
   router.use("/playlists", limit);
-  router.get("/playlists/owner", (req, res) => res.json({ owner: owner(req), configured: Boolean(sessionSecret() && process.env.AUDIOSTRIKE_OWNER_PASSWORD) }));
-  router.post("/playlists/owner", sameOrigin, (req, res) => {
-    const password = process.env.AUDIOSTRIKE_OWNER_PASSWORD, secret = sessionSecret();
-    if (!password || !secret) { res.status(503).json({ error: "The owner must configure the upload password in Secrets" }); return; }
-    if (typeof req.body?.password !== "string" || req.body.password.length > 256 || !equal(req.body.password, password)) {
-      res.status(401).json({ error: "Incorrect owner password" }); return;
+  router.get("/playlists/owner", (req, res) => res.json({
+    owner: isOwner(req, now()),
+    configured: googleOAuthConfigured() && Boolean(redirectUriFor(req)),
+  }));
+  router.get("/playlists/owner/google", (req, res) => {
+    const secret = process.env.SESSION_SECRET;
+    const clientId = process.env.AUDIOSTRIKE_GOOGLE_CLIENT_ID;
+    const redirectUri = redirectUriFor(req);
+    const returnTo = req.query.returnTo;
+    if (!secret || !clientId || !process.env.AUDIOSTRIKE_GOOGLE_CLIENT_SECRET || !redirectUri) {
+      res.status(503).json({ error: "Google owner sign-in is not configured for this app address" }); return;
     }
-    const expiry = String(Date.now() + 8 * 3600_000);
-    const signature = createHmac("sha256", secret).update(`${expiry}:${password}`).digest("hex");
-    res.cookie(COOKIE, `${expiry}.${signature}`, { httpOnly: true, secure: process.env.NODE_ENV === "production" || req.headers["x-forwarded-proto"] === "https", sameSite: "strict", path: "/api/playlists", maxAge: 8 * 3600_000 });
-    res.json({ owner: true, configured: true });
+    if (returnTo !== "/" && returnTo !== "/audiostrike-legacy/") {
+      res.status(400).json({ error: "Invalid sign-in return path" }); return;
+    }
+    const state: GoogleLoginState = {
+      state: randomBytes(32).toString("base64url"),
+      nonce: randomBytes(32).toString("base64url"),
+      verifier: randomBytes(32).toString("base64url"),
+      returnTo,
+      issuedAt: now(),
+    };
+    const challenge = createHash("sha256").update(state.verifier).digest("base64url");
+    const authorization = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    authorization.search = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "openid email",
+      state: state.state,
+      nonce: state.nonce,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      prompt: "select_account",
+    }).toString();
+    res.cookie(GOOGLE_STATE_COOKIE, createSignedLoginState(state, secret), {
+      httpOnly: true, secure: secureCookie(req), sameSite: "lax",
+      path: "/api/playlists/owner/google", maxAge: GOOGLE_STATE_MS,
+    });
+    res.redirect(302, authorization.toString());
   });
-  router.delete("/playlists/owner", sameOrigin, (_req, res) => {
-    res.clearCookie(COOKIE, { httpOnly: true, sameSite: "strict", path: "/api/playlists" });
+  router.get("/playlists/owner/google/callback", async (req, res): Promise<void> => {
+    const secret = process.env.SESSION_SECRET;
+    const stateValue = typeof req.query.state === "string" ? req.query.state : "";
+    const state = secret ? readSignedLoginState(getCookie(req, GOOGLE_STATE_COOKIE), secret, now()) : null;
+    res.clearCookie(GOOGLE_STATE_COOKIE, {
+      httpOnly: true, secure: secureCookie(req), sameSite: "lax", path: "/api/playlists/owner/google",
+    });
+    if (!state || !stateValue || !/^[A-Za-z0-9_-]{40,64}$/.test(stateValue) ||
+      state.state.length !== stateValue.length || !timingSafeEqual(Buffer.from(state.state), Buffer.from(stateValue))) {
+      res.status(400).json({ error: "Google sign-in state is invalid or expired" }); return;
+    }
+    const finish = (result: "success" | "denied") => {
+      const separator = state.returnTo.includes("?") ? "&" : "?";
+      res.redirect(303, `${state.returnTo}${separator}ownerSignIn=${result}`);
+    };
+    if (req.query.error || typeof req.query.code !== "string" || !secret ||
+      !process.env.AUDIOSTRIKE_GOOGLE_CLIENT_ID || !process.env.AUDIOSTRIKE_GOOGLE_CLIENT_SECRET) {
+      finish("denied"); return;
+    }
+    try {
+      const redirectUri = redirectUriFor(req);
+      if (!redirectUri) { finish("denied"); return; }
+      const idToken = await exchangeGoogleCode(req.query.code, state.verifier, redirectUri, oauthFetch);
+      if (!idToken) { finish("denied"); return; }
+      const email = await verifyGoogleIdentity(idToken, state.nonce, process.env.AUDIOSTRIKE_GOOGLE_CLIENT_ID);
+      if (!email) { finish("denied"); return; }
+      res.cookie(OWNER_COOKIE, createOwnerSession(now() + OWNER_SESSION_MS), {
+        httpOnly: true, secure: secureCookie(req), sameSite: "strict",
+        path: "/api/playlists", maxAge: OWNER_SESSION_MS,
+      });
+      finish("success");
+    } catch {
+      finish("denied");
+    }
+  });
+  router.delete("/playlists/owner", sameOrigin, (req, res) => {
+    res.clearCookie(OWNER_COOKIE, { httpOnly: true, secure: secureCookie(req), sameSite: "strict", path: "/api/playlists" });
     res.status(204).end();
   });
   router.get("/playlists/library", handle(async (_req, res) => { res.json(await library.library()); }));

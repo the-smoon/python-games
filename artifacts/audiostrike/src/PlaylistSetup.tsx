@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import {
   getGetMusicLibraryQueryKey, getGetOwnerStatusQueryKey, getListSharedPlaylistsQueryKey,
-  loadSharedPlaylist, ownerSignIn, ownerSignOut, saveSharedPlaylist,
+  loadSharedPlaylist, ownerSignOut, saveSharedPlaylist,
   useGetMusicLibrary, useGetOwnerStatus, useListSharedPlaylists,
 } from '@workspace/api-client-react';
 import { moveTrack, type LocalTrack } from './playlistRules';
@@ -50,15 +50,21 @@ function Setup({ tracks, onTracks, random, onRandom, onBusy }: {
   const [error, setError] = useState('');
   const [name, setName] = useState('');
   const [selectedId, setSelectedId] = useState('');
-  const [password, setPassword] = useState('');
   const active = useRef<AbortController | null>(null);
   const tracksRef = useRef(tracks);
   tracksRef.current = tracks;
   const total = tracks.reduce((sum, t) => sum + t.file.size, 0);
   const isOwner = owner.data?.owner === true;
   const configured = owner.data?.configured === true;
+  const signInHref = `${api}/owner/google?returnTo=${encodeURIComponent(import.meta.env.BASE_URL)}`;
 
   useEffect(() => () => { active.current?.abort(); onBusy(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get('ownerSignIn');
+    if (!result) return;
+    setStatus(result === 'success' ? 'Owner signed in.' : 'Sign-in was not completed. Use the verified owner Google account.');
+    window.history.replaceState({}, '', `${window.location.pathname}${window.location.hash}`);
+  }, []);
 
   const run = async (work: (signal: AbortSignal) => Promise<void>, start: string) => {
     if (active.current) return;
@@ -115,17 +121,9 @@ function Setup({ tracks, onTracks, random, onRandom, onBusy }: {
     void qc.invalidateQueries({ queryKey: getGetMusicLibraryQueryKey() });
     void qc.invalidateQueries({ queryKey: getListSharedPlaylistsQueryKey() });
   };
-  const login = async () => {
-    const value = password;
-    setPassword('');
-    await run(async (signal) => {
-      const s = await ownerSignIn({ password: value }, { signal });
-      qc.setQueryData(getGetOwnerStatusQueryKey(), s);
-      setStatus(s.owner ? 'Owner signed in.' : 'Sign in failed.');
-    }, 'Signing in...');
-  };
   const logout = () => void run(async (signal) => {
     await ownerSignOut({ signal });
+    qc.setQueryData(getGetOwnerStatusQueryKey(), { owner: false, configured: true });
     await qc.invalidateQueries({ queryKey: getGetOwnerStatusQueryKey() });
     setStatus('Signed out.');
   }, 'Signing out...');
@@ -212,14 +210,11 @@ function Setup({ tracks, onTracks, random, onRandom, onBusy }: {
         <input type="file" accept=".mp3,audio/mpeg" data-testid="input-owner-upload" disabled={busy}
           className="mt-3 block w-full text-xs text-slate-300" onChange={(e) => { upload(e.target.files?.[0]); e.target.value = ''; }} />
         <p className="mt-2 text-xs text-slate-500">MP3 only, 24 MB maximum. Adds to the shared library.</p>
-      </> : <form onSubmit={(e) => { e.preventDefault(); void login(); }} autoComplete="off">
-        <label className={label} htmlFor="owner-password">Owner sign in</label>
-        <div className="mt-2 flex gap-2">
-          <input id="owner-password" data-testid="input-owner-password" type="password" maxLength={256} className={field}
-            value={password} disabled={busy} autoComplete="off" onChange={(e) => setPassword(e.target.value)} />
-          <button type="submit" className={button} data-testid="button-owner-signin" disabled={busy || !password}>Sign in</button>
-        </div>
-      </form>}
+      </> : <div>
+        <span className={label}>Owner sign in</span>
+        <a className={`${button} mt-2 inline-flex`} data-testid="button-owner-signin" href={signInHref}>Sign in with Google</a>
+        <p className="mt-2 text-xs text-slate-500">Uploads are limited to the verified owner Google account.</p>
+      </div>}
     </div>}
 
     {status && <p className="mt-4 text-sm text-slate-300" role="status" data-testid="playlist-status">{status}</p>}

@@ -6,9 +6,11 @@
  */
 
 export * from './audioFingerprint';
+export * from './beginOwnerGoogleSignInParams';
+export * from './beginOwnerGoogleSignInReturnTo';
+export * from './completeOwnerGoogleSignInParams';
 export * from './driveTrack';
 export * from './healthStatus';
-export * from './ownerLoginInput';
 export * from './ownerStatus';
 export * from './playlistSummary';
 export * from './runScore';

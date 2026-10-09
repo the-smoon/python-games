@@ -1,17 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
 import { ReplitConnectors } from '@replit/connectors-sdk';
 
-// Opt-in only: writes a temporary playlist and MP3 to the connected library.
+// Opt-in only: writes a temporary shared playlist to the connected library.
 // Secrets are consumed by the test runtime, never printed or saved to traces.
-test('live Drive shared save/load and owner-only MP3 upload', {
+test('live Drive shared save/load and anonymous upload rejection', {
   skip: process.env.AUDIOSTRIKE_LIVE_TEST !== '1', timeout: 180_000,
 }, async () => {
-  assert.ok(process.env.AUDIOSTRIKE_OWNER_PASSWORD, 'Owner password must be configured');
   const executablePath = process.env.CHROMIUM_PATH || execFileSync('which', ['chromium'], { encoding: 'utf8' }).trim();
   const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox'] });
   const created = [], connectors = new ReplitConnectors();
@@ -21,9 +19,14 @@ test('live Drive shared save/load and owner-only MP3 upload', {
     context.setDefaultTimeout(15_000);
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/');
+    await page.goto(process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/audiostrike-legacy/');
     assert.equal(await page.getByTestId('button-analyze').isDisabled(), true);
     assert.equal(await page.getByTestId('input-owner-upload').count(), 0);
+    assert.equal(await page.getByTestId('input-owner-password').count(), 0);
+    const ownerSignIn = page.getByTestId('button-owner-signin');
+    if (await ownerSignIn.count()) {
+      assert.equal(new URL(await ownerSignIn.getAttribute('href'), page.url()).searchParams.get('returnTo'), '/audiostrike-legacy/');
+    }
     const add = page.getByTestId('library-tracks').getByRole('button', { name: 'Add', exact: true }).first();
     await add.waitFor();
     await add.click();
@@ -51,31 +54,6 @@ test('live Drive shared save/load and owner-only MP3 upload', {
     assert.equal(forbidden.status(), 403);
     console.log('Live verification: second player loaded playlist; anonymous upload rejected');
 
-    await page.getByTestId('input-owner-password').fill(process.env.AUDIOSTRIKE_OWNER_PASSWORD);
-    await page.getByTestId('button-owner-signin').click();
-    await page.getByTestId('input-owner-upload').waitFor();
-    console.log('Live verification: owner signed in');
-    const uploadResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/playlists/upload');
-    await page.getByTestId('input-owner-upload').setInputFiles({
-      name: `${unique}.mp3`, mimeType: 'audio/mpeg',
-      buffer: await readFile(new URL('../../api-server/tests/fixtures/tone.mp3', import.meta.url)),
-    });
-    const upload = await uploadResponse;
-    assert.equal(upload.status(), 201);
-    // Chromium may discard Network.getResponseBody for file-input uploads.
-    // Verify the actual persisted library entry through a fresh API request.
-    const libraryResponse = await context.request.get(new URL('/api/playlists/library', page.url()).href);
-    assert.equal(libraryResponse.status(), 200);
-    const track = (await libraryResponse.json()).find(track => track.title === `${unique}.mp3`);
-    assert.ok(track, 'Uploaded MP3 must appear in a fresh library request');
-    created.push(track.id);
-    console.log('Live verification: owner MP3 upload accepted');
-    await page.getByTestId(`button-add-${track.id}`).waitFor({ state: 'attached' });
-    console.log('Live verification: uploaded MP3 appears in library');
-    await page.getByTestId('button-owner-signout').click();
-    await page.getByTestId('input-owner-password').waitFor();
-    assert.equal(await page.getByTestId('input-owner-upload').count(), 0);
-    console.log('Live verification: owner signed out');
     assert.deepEqual(errors, []);
     await playerContext.close();
   } finally {

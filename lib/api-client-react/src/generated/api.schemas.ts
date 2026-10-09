@@ -168,13 +168,26 @@ export interface SavedPlaylist {
   tracks: DriveTrack[];
 }
 
-export interface OwnerLoginInput {
-  /** @maxLength 256 */
-  password: string;
-}
-
 export interface OwnerStatus {
   owner: boolean;
   configured: boolean;
 }
+
+export type BeginOwnerGoogleSignInParams = {
+returnTo: BeginOwnerGoogleSignInReturnTo;
+};
+
+export type BeginOwnerGoogleSignInReturnTo = typeof BeginOwnerGoogleSignInReturnTo[keyof typeof BeginOwnerGoogleSignInReturnTo];
+
+
+export const BeginOwnerGoogleSignInReturnTo = {
+  '/': '/',
+  '/audiostrike-legacy/': '/audiostrike-legacy/',
+} as const;
+
+export type CompleteOwnerGoogleSignInParams = {
+state: string;
+code?: string;
+error?: string;
+};
 

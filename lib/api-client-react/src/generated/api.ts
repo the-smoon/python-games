@@ -19,9 +19,10 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  BeginOwnerGoogleSignInParams,
+  CompleteOwnerGoogleSignInParams,
   DriveTrack,
   HealthStatus,
-  OwnerLoginInput,
   OwnerStatus,
   PlaylistSummary,
   RunScore,
@@ -751,71 +752,6 @@ export function useGetOwnerStatus<TData = Awaited<ReturnType<typeof getOwnerStat
 
 
 
-export const getOwnerSignInUrl = () => {
-
-
-
-
-  return `/api/playlists/owner`
-}
-
-export const ownerSignIn = async (ownerLoginInput: OwnerLoginInput, options?: RequestInit): Promise<OwnerStatus> => {
-
-  return customFetch<OwnerStatus>(getOwnerSignInUrl(),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(ownerLoginInput)
-  }
-);}
-
-
-
-
-
-export const getOwnerSignInMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ownerSignIn>>, TError,{data: BodyType<OwnerLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof ownerSignIn>>, TError,{data: BodyType<OwnerLoginInput>}, TContext> => {
-
-const mutationKey = ['ownerSignIn'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof ownerSignIn>>, {data: BodyType<OwnerLoginInput>}> = (props) => {
-          const {data} = props ?? {};
-
-          return  ownerSignIn(data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type OwnerSignInMutationResult = NonNullable<Awaited<ReturnType<typeof ownerSignIn>>>
-    export type OwnerSignInMutationBody = BodyType<OwnerLoginInput>
-    export type OwnerSignInMutationError = ErrorType<unknown>
-
-    export const useOwnerSignIn = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ownerSignIn>>, TError,{data: BodyType<OwnerLoginInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
-        Awaited<ReturnType<typeof ownerSignIn>>,
-        TError,
-        {data: BodyType<OwnerLoginInput>},
-        TContext
-      > => {
-      return useMutation(getOwnerSignInMutationOptions(options));
-    }
-
 export const getOwnerSignOutUrl = () => {
 
 
@@ -880,6 +816,162 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getOwnerSignOutMutationOptions(options));
     }
+
+export const getBeginOwnerGoogleSignInUrl = (params: BeginOwnerGoogleSignInParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/playlists/owner/google?${stringifiedParams}` : `/api/playlists/owner/google`
+}
+
+export const beginOwnerGoogleSignIn = async (params: BeginOwnerGoogleSignInParams, options?: RequestInit): Promise<unknown> => {
+
+  return customFetch<unknown>(getBeginOwnerGoogleSignInUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getBeginOwnerGoogleSignInQueryKey = (params?: BeginOwnerGoogleSignInParams,) => {
+    return [
+    `/api/playlists/owner/google`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getBeginOwnerGoogleSignInQueryOptions = <TData = Awaited<ReturnType<typeof beginOwnerGoogleSignIn>>, TError = ErrorType<void>>(params: BeginOwnerGoogleSignInParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof beginOwnerGoogleSignIn>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getBeginOwnerGoogleSignInQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof beginOwnerGoogleSignIn>>> = ({ signal }) => beginOwnerGoogleSignIn(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof beginOwnerGoogleSignIn>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type BeginOwnerGoogleSignInQueryResult = NonNullable<Awaited<ReturnType<typeof beginOwnerGoogleSignIn>>>
+export type BeginOwnerGoogleSignInQueryError = ErrorType<void>
+
+
+
+export function useBeginOwnerGoogleSignIn<TData = Awaited<ReturnType<typeof beginOwnerGoogleSignIn>>, TError = ErrorType<void>>(
+ params: BeginOwnerGoogleSignInParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof beginOwnerGoogleSignIn>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getBeginOwnerGoogleSignInQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCompleteOwnerGoogleSignInUrl = (params: CompleteOwnerGoogleSignInParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/playlists/owner/google/callback?${stringifiedParams}` : `/api/playlists/owner/google/callback`
+}
+
+export const completeOwnerGoogleSignIn = async (params: CompleteOwnerGoogleSignInParams, options?: RequestInit): Promise<unknown> => {
+
+  return customFetch<unknown>(getCompleteOwnerGoogleSignInUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getCompleteOwnerGoogleSignInQueryKey = (params?: CompleteOwnerGoogleSignInParams,) => {
+    return [
+    `/api/playlists/owner/google/callback`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getCompleteOwnerGoogleSignInQueryOptions = <TData = Awaited<ReturnType<typeof completeOwnerGoogleSignIn>>, TError = ErrorType<void>>(params: CompleteOwnerGoogleSignInParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof completeOwnerGoogleSignIn>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getCompleteOwnerGoogleSignInQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof completeOwnerGoogleSignIn>>> = ({ signal }) => completeOwnerGoogleSignIn(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof completeOwnerGoogleSignIn>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type CompleteOwnerGoogleSignInQueryResult = NonNullable<Awaited<ReturnType<typeof completeOwnerGoogleSignIn>>>
+export type CompleteOwnerGoogleSignInQueryError = ErrorType<void>
+
+
+
+export function useCompleteOwnerGoogleSignIn<TData = Awaited<ReturnType<typeof completeOwnerGoogleSignIn>>, TError = ErrorType<void>>(
+ params: CompleteOwnerGoogleSignInParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof completeOwnerGoogleSignIn>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getCompleteOwnerGoogleSignInQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getUploadOwnerMp3Url = () => {
 
