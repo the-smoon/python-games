@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { once } from "node:events";
-import express from "express";
+import express, { type ErrorRequestHandler } from "express";
 process.env.DATABASE_URL ??= "postgres://test:test@127.0.0.1:1/run_score_tests";
 const { createRunScoresRouter } = await import("../src/routes/run-scores");
 
@@ -46,8 +46,13 @@ function memoryStore() {
 
 async function withApi(save: ReturnType<typeof memoryStore>["save"], run: (baseUrl: string) => Promise<void>) {
   const app = express();
+  app.post("/run-scores", express.json({ limit: "80kb" }));
   app.use(express.json({ limit: "4kb" }));
   app.use(createRunScoresRouter(save));
+  const errors: ErrorRequestHandler = (error, _req, res, _next) => {
+    res.status(error.status ?? 500).json({ error: "Invalid request body" });
+  };
+  app.use(errors);
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -140,8 +145,125 @@ test("rejects inconsistent playlist clips and tracks not in the intended order",
         tracksPlayed: [{ trackId: "track-b", title: "Not in order", startSeconds: 0, endSeconds: 10 }],
       },
     });
+    const zeroLength = input(runId, {
+      playlistMetadata: {
+        playlistName: "Broken",
+        intendedTrackOrder: [{ trackId: "track-a", title: "Stage song" }],
+        tracksPlayed: [{ trackId: "track-a", title: "Stage song", startSeconds: 10, endSeconds: 10 }],
+      },
+    });
+    const tooLongClip = input(runId, {
+      playlistMetadata: {
+        playlistName: "Broken",
+        intendedTrackOrder: [{ trackId: "track-a", title: "Stage song" }],
+        tracksPlayed: [{ trackId: "track-a", title: "Stage song", startSeconds: 0, endSeconds: 721 }],
+      },
+    });
     assert.equal((await send(baseUrl, reversed)).response.status, 400);
     assert.equal((await send(baseUrl, notInOrder)).response.status, 400);
+    assert.equal((await send(baseUrl, zeroLength)).response.status, 400);
+    assert.equal((await send(baseUrl, tooLongClip)).response.status, 400);
+    assert.equal(store.writes, 0);
+  });
+});
+
+test("accepts metadata at its field and collection limits and persists the full shape", async () => {
+  const store = memoryStore();
+  const runId = "3d12e8a0-ec4d-4f50-8ef1-2ab3c4d5e6f7";
+  const tracks = Array.from({ length: 20 }, (_, index) => ({
+    trackId: `${String(index).padStart(2, "0")}-${"a".repeat(197)}`,
+    title: "中".repeat(255),
+  }));
+  const playlistMetadata = {
+    playlistName: "P".repeat(80),
+    intendedTrackOrder: tracks,
+    tracksPlayed: tracks.map((track) => ({ ...track, startSeconds: 0, endSeconds: 720 })),
+  };
+  const score = input(runId, { playlistMetadata });
+  assert.ok(Buffer.byteLength(JSON.stringify(score)) > 4 * 1024,
+    "the valid maximum metadata payload exceeds the standard JSON request limit");
+
+  await withApi(store.save, async (baseUrl) => {
+    const response = await send(baseUrl, score);
+    assert.equal(response.response.status, 201);
+    assert.deepEqual(response.body.playlistMetadata, playlistMetadata);
+    assert.deepEqual(store.rows.get(runId)?.playlistMetadata, playlistMetadata);
+    assert.equal(store.writes, 1);
+  });
+});
+
+test("rejects oversized metadata fields, collections, and unknown properties", async () => {
+  const store = memoryStore();
+  const runId = "c4f2e6a1-9b74-4c20-8fd3-50a123456789";
+  const base = input(runId);
+  const oversizedName = input(runId, {
+    playlistMetadata: { ...base.playlistMetadata, playlistName: "P".repeat(81) },
+  });
+  const emptyOrder = input(runId, {
+    playlistMetadata: { ...base.playlistMetadata, intendedTrackOrder: [] },
+  });
+  const tooManyTracks = input(runId, {
+    playlistMetadata: {
+      ...base.playlistMetadata,
+      intendedTrackOrder: Array.from({ length: 21 }, (_, index) => ({
+        trackId: `track-${index}`,
+        title: "Track",
+      })),
+    },
+  });
+  const oversizedTitle = input(runId, {
+    playlistMetadata: {
+      ...base.playlistMetadata,
+      intendedTrackOrder: [{ trackId: "track-a", title: "T".repeat(256) }],
+    },
+  });
+  const oversizedId = input(runId, {
+    playlistMetadata: {
+      ...base.playlistMetadata,
+      intendedTrackOrder: [{ trackId: "a".repeat(201), title: "Track" }],
+    },
+  });
+  const metadataWithExtra = {
+    ...base.playlistMetadata,
+    unexpected: "not allowed",
+  };
+  const trackWithExtra = {
+    ...base.playlistMetadata.intendedTrackOrder[0],
+    unexpected: "not allowed",
+  };
+  const extraMetadataField = { ...base, playlistMetadata: metadataWithExtra };
+  const extraTrackField = {
+    ...base,
+    playlistMetadata: { ...base.playlistMetadata, intendedTrackOrder: [trackWithExtra] },
+  };
+  const extraTopLevelField = { ...base, unexpected: "not allowed" };
+
+  await withApi(store.save, async (baseUrl) => {
+    for (const body of [oversizedName, emptyOrder, tooManyTracks, oversizedTitle, oversizedId]) {
+      assert.equal((await send(baseUrl, body)).response.status, 400);
+    }
+    assert.equal(store.writes, 0);
+  });
+
+  await withApi(store.save, async (baseUrl) => {
+    for (const body of [extraMetadataField, extraTrackField, extraTopLevelField]) {
+      assert.equal((await send(baseUrl, body)).response.status, 400);
+    }
+    assert.equal(store.writes, 0);
+  });
+});
+
+test("rejects JSON requests above the dedicated run-score body limit", async () => {
+  const store = memoryStore();
+  await withApi(store.save, async (baseUrl) => {
+    const runId = "d1e2f3a4-b5c6-4d7e-8f90-a1b2c3d4e5f6";
+    const body = input(runId, {
+      playlistMetadata: {
+        ...input(runId).playlistMetadata,
+        playlistName: "P".repeat(81 * 1024),
+      },
+    });
+    assert.equal((await send(baseUrl, body)).response.status, 413);
     assert.equal(store.writes, 0);
   });
 });

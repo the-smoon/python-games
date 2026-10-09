@@ -72,6 +72,7 @@ test('game over allows replay without saving and retains a bounded callsign for 
     assert.match(await firstSuggestion.inputValue(), /^[A-Z]+-\d{2}$/);
     await page.getByTestId('button-clear-run-score-name').click();
     assert.equal(await firstSuggestion.inputValue(), '');
+    assert.equal(submissions.length, 0, 'game over does not save a score or playlist details on its own');
 
     await page.getByTestId('button-replay-game-over').click();
     await page.clock.runFor(4000);

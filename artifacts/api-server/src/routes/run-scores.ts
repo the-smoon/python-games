@@ -5,6 +5,26 @@ import { SubmitRunScoreBody, SubmitRunScoreResponse, type RunScoreInput } from "
 
 type SaveRunScore = (input: RunScoreInput) => Promise<{ row: RunScoreRow; created: boolean }>;
 
+function hasOnlyKeys(value: unknown, expected: readonly string[]): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length === expected.length && keys.every((key) => expected.includes(key));
+}
+
+function hasStrictSubmissionShape(value: unknown): boolean {
+  if (!hasOnlyKeys(value, ["runId", "name", "score", "levelReached", "bossLevelReached", "playlistMetadata"])) {
+    return false;
+  }
+  const metadata = (value as Record<string, unknown>).playlistMetadata;
+  if (!hasOnlyKeys(metadata, ["playlistName", "intendedTrackOrder", "tracksPlayed"])) return false;
+  const fields = metadata as Record<string, unknown>;
+  return Array.isArray(fields.intendedTrackOrder) &&
+    fields.intendedTrackOrder.every((track) => hasOnlyKeys(track, ["trackId", "title"])) &&
+    Array.isArray(fields.tracksPlayed) &&
+    fields.tracksPlayed.every((track) =>
+      hasOnlyKeys(track, ["trackId", "title", "startSeconds", "endSeconds"]));
+}
+
 async function saveRunScore(input: RunScoreInput): Promise<{ row: RunScoreRow; created: boolean }> {
   const { db, runScoresTable } = await import("@workspace/db");
   const [inserted] = await db.insert(runScoresTable).values(input).onConflictDoNothing({
@@ -83,7 +103,7 @@ export function createRunScoresRouter(save: SaveRunScore = saveRunScore) {
     }
 
     const parsed = SubmitRunScoreBody.safeParse(req.body);
-    if (!parsed.success) {
+    if (!parsed.success || !hasStrictSubmissionShape(req.body)) {
       res.status(400).json({ error: "Invalid run score." });
       return;
     }

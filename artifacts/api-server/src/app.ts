@@ -28,6 +28,7 @@ app.use(
   }),
 );
 app.use(cors());
+app.post("/api/run-scores", express.json({ limit: "80kb" }));
 app.use(express.json({ limit: "4kb" }));
 app.use(express.urlencoded({ extended: true, limit: "4kb" }));
 
@@ -37,7 +38,7 @@ const errors: ErrorRequestHandler = (error, req, res, next) => {
   if (res.headersSent) { next(error); return; }
   const status = error.status === 413 ? 413 : error.status === 400 ? 400 : 500;
   if (status === 500) req.log.error("Unhandled API request error");
-    res.status(status).json({ error: status === 413 ? "Request exceeds the size limit (MP3: 24 MB; JSON: 4 KB)"
+    res.status(status).json({ error: status === 413 ? "Request exceeds the size limit for this endpoint."
     : status === 400 ? "Invalid request body" : "The request could not be completed" });
 };
 app.use(errors);
