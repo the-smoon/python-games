@@ -260,7 +260,7 @@ test('automatic boss attacks use blast zones more often than alternate abilities
   assert.equal(casts.filter(kind => kind !== 'BLAST').length, 2);
 });
 
-test('all weapon families gain steep rank-six and rank-seven power; rank-seven twin companions remain durable', () => {
+test('all weapon families gain steep rank-six and rank-seven power; twin companions have durable hulls', () => {
   for (const type of ['TWIN', 'SPREAD', 'LASER']) {
     const amount = (rank) => {
       const stats = weaponStats(type, rank);

@@ -38,6 +38,8 @@ test('cached analysis survives reload; boss damage, buffs and death effects work
     await start();
     const snap = () => page.evaluate(() => window.__AUDIOSTRIKE_TEST__.snapshot());
     const first = await snap();
+    assert.equal(first.playerHealth, 200, 'the base hull is 200');
+    assert.equal(first.weapon.type, 'LASER', 'the deterministic starting-weapon roll selects laser');
     assert.match(first.stageAnalysis.songKey, /^[a-f0-9]{64}$/);
     assert.notEqual(first.stageAnalysis.songKey, first.bossAnalysis.songKey);
     assert.notDeepEqual(first.stageAnalysis.design.colors, first.bossAnalysis.design.colors);
@@ -146,7 +148,7 @@ test('combat progression, shield expiry, hostile shots and collisions follow the
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.clock.install();
-    await page.addInitScript(() => { window.__RHYTHM_FIGHTER_TEST_MODE__ = true; });
+    await page.addInitScript(() => { window.__RHYTHM_FIGHTER_TEST_MODE__ = true; Math.random = () => .7; });
     await page.goto(url);
     await selectMockPlaylist(page, [
       { name: 'combat-stage.mp3', buffer: tone(271) },
@@ -167,13 +169,13 @@ test('combat progression, shield expiry, hostile shots and collisions follow the
       api.setPlayer({ x: 210, y: 760, vx: 0, vy: 0, health: 50 });
     });
 
-    // Switching keeps rank and hull, then shadows only weapon drops for thirty seconds.
+    // Switching keeps rank and hull, then shadows only weapon drops for ten seconds.
     await pickup('SPREAD');
     let state = await snap();
     assert.equal(state.weapon.type, 'SPREAD');
     assert.equal(state.weapon.rank, 1);
     assert.equal(state.playerHealth, 50);
-    assert.ok(state.weapon.weaponSwitchUntil - state.now > 29);
+    assert.ok(state.weapon.weaponSwitchUntil - state.now > 9);
     assert.match(await page.getByTestId('hud-weapon').innerText(), /Weapon lock/);
     await pickup('TWIN');
     state = await snap();
@@ -184,10 +186,10 @@ test('combat progression, shield expiry, hostile shots and collisions follow the
 
     // Higher shields replace at full HP. Expiry emits exactly one projectile per remaining shield HP.
     await pickup('SHIELD');
-    assert.equal((await snap()).weapon.shieldHP, 20);
+    assert.equal((await snap()).weapon.shieldHP, 100);
     await pickup('SHIELD_2');
     state = await snap();
-    assert.deepEqual([state.weapon.shieldTier, state.weapon.shieldHP, state.weapon.shieldMaxHP], [2, 35, 35]);
+    assert.deepEqual([state.weapon.shieldTier, state.weapon.shieldHP, state.weapon.shieldMaxHP], [2, 200, 200]);
     assert.ok(Math.abs(state.weapon.shieldUntil - state.now - 10) < .2);
     assert.equal(await page.getByTestId('hud-shield').isVisible(), true);
     await run(() => {
@@ -196,12 +198,12 @@ test('combat progression, shield expiry, hostile shots and collisions follow the
     });
     await tick(40);
     assert.equal((await snap()).playerHealth, 75);
-    assert.equal((await snap()).weapon.shieldHP, 30);
+    assert.equal((await snap()).weapon.shieldHP, 195);
     const expiryAt = (await snap()).now + .12;
     await run(until => {
       const api = window.__AUDIOSTRIKE_TEST__;
       api.clearArena();
-      api.setWeapon({ shieldTier: 2, shieldHP: 3, shieldMaxHP: 35, shieldUntil: until });
+      api.setWeapon({ shieldTier: 2, shieldHP: 3, shieldMaxHP: 200, shieldUntil: until });
     }, expiryAt);
     await tick(220);
     state = await snap();
@@ -298,7 +300,7 @@ test('combat progression, shield expiry, hostile shots and collisions follow the
     await tick(40);
     state = await snap();
     assert.equal(state.playerHealth, 100, 'the active shield absorbs ramming damage');
-    assert.equal(state.weapon.shieldHP, 0);
+    assert.equal(state.weapon.shieldHP, 64, 'the fresh 100-HP shield loses 36 HP to the ram');
     assert.equal(state.enemies.length, 0, 'shielded ramming destroys a common enemy');
 
     // Breaking a shield triggers the short forward cone; it can hit enemies ahead, not bosses.
@@ -311,6 +313,7 @@ test('combat progression, shield expiry, hostile shots and collisions follow the
     await tick(50);
     await run(() => {
       const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
+      api.setWeapon({ shieldTier: 1, shieldHP: 3, shieldMaxHP: 100, shieldUntil: api.snapshot().now + 10 });
       api.enemyShot(p.x, p.y, 25);
     });
     await tick(50);

@@ -1,37 +1,57 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, enemyDropChance,
+import { advanceCompanionRespawns, advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, damageCompanion, enemyDropChance,
   absorbShieldHit, convertWeaponPickupsAtMaxRank, expireShield, fireWeapon, freezeSplash, hasActiveShield,
-  insideForwardShieldCone, laserHitsTarget, newWeaponState, pickDrop, slowScale, tickFrozenBullet,
+  insideForwardShieldCone, laserHitsTarget, newWeaponState, pickDrop, randomStartingWeapon, slowScale, tickFrozenBullet,
   weaponStats, WEAPON_BALANCE } from '../src/weaponRules.ts';
 import { advanceProjectiles, damageBoss } from '../src/gameRules.ts';
 
 const player = { x: 210, y: 450, vx: 0, vy: 0 };
-test('weapons rank to seven; switching preserves rank and locks weapon pickups for thirty seconds', () => {
+test('new runs can start with any weapon; weapon switches preserve rank and lock pickups for ten seconds', () => {
+  assert.equal(randomStartingWeapon(() => 0), 'TWIN');
+  assert.equal(randomStartingWeapon(() => .34), 'SPREAD');
+  assert.equal(randomStartingWeapon(() => .67), 'LASER');
+  assert.equal(newWeaponState('LASER').type, 'LASER');
+  assert.equal(WEAPON_BALANCE.maxHealth, 200);
+  assert.deepEqual(WEAPON_BALANCE.shieldTierHP, [0, 100, 200, 300]);
   const w = newWeaponState();
   for (let i = 0; i < WEAPON_BALANCE.maxRank - 1; i++) collectPickup(w, 'TWIN', 100, i);
   assert.equal(w.rank, 7);
   assert.deepEqual(w.companions, [WEAPON_BALANCE.companionHP, WEAPON_BALANCE.companionHP]);
   const result = collectPickup(w, 'SPREAD', 30, 10);
   assert.equal(w.type, 'SPREAD'); assert.equal(w.rank, 7); assert.equal(result.health, 30);
-  assert.equal(w.weaponSwitchUntil, 40);
+  assert.equal(w.weaponSwitchUntil, 20);
   assert.deepEqual(w.companions, [0, 0]);
   const blockedWeapon = { type: 'LASER', x: player.x, y: player.y, expiresAt: 50, alive: true };
-  assert.equal(advancePickup(blockedWeapon, player, 20, 0, 900, 20 >= w.weaponSwitchUntil), false);
+  assert.equal(advancePickup(blockedWeapon, player, 19, 0, 900, 19 >= w.weaponSwitchUntil), false);
   assert.equal(blockedWeapon.alive, true);
+  const unlockedWeapon = { ...blockedWeapon, alive: true };
+  assert.equal(advancePickup(unlockedWeapon, player, 20, 0, 900, 20 >= w.weaponSwitchUntil), true);
   const unrelated = { type: 'REPAIR', x: player.x, y: player.y, expiresAt: 50, alive: true };
   assert.equal(advancePickup(unrelated, player, 20, 0, 900), true);
   assert.equal(collectPickup(w, 'LASER', 70, 40).health, 70);
   assert.equal(w.rank, 7);
-  assert.equal(w.weaponSwitchUntil, 70);
+  assert.equal(w.weaponSwitchUntil, 50);
 });
-test('rank-seven twin pickups restore destroyed companions without replacing damaged ones', () => {
-  const w = newWeaponState(); w.rank = 7; w.companions = [0, 7];
-  collectPickup(w, 'TWIN', 100, 0);
-  assert.deepEqual(w.companions, [WEAPON_BALANCE.companionHP, 7]);
-  assert.equal(fireWeapon(w, player, 0).shots.length, 6);
-  w.companions[0] = 0;
-  assert.equal(fireWeapon(w, player, 1).shots.length, 5);
+test('rank-seven wingmen take damage, then fly up from off-screen and rejoin at full health', () => {
+  const w = newWeaponState('TWIN'); w.rank = 7; w.companions = [90, 90];
+  assert.equal(damageCompanion(w, 0, 25, 5), false);
+  assert.equal(w.companions[0], 65, 'enemy damage still weakens the wingman');
+  assert.equal(damageCompanion(w, 0, 100, 5), true);
+  assert.equal(w.companions[0], 0);
+  const start = w.companionRespawnStartedAt[0];
+  assert.equal(start, 5);
+  const offscreen = companionPositions(player, w, 420, start, 900)[0];
+  assert.equal(offscreen.arriving, true);
+  assert.equal(offscreen.y, 925);
+  const halfway = companionPositions(player, w, 420, start + WEAPON_BALANCE.companionRejoinSeconds / 2, 900)[0];
+  assert.ok(halfway.y < offscreen.y && halfway.y > player.y + 8, 'the replacement moves upward toward formation');
+  advanceCompanionRespawns(w, start + WEAPON_BALANCE.companionRejoinSeconds - .01);
+  assert.equal(w.companions[0], 0);
+  advanceCompanionRespawns(w, start + WEAPON_BALANCE.companionRejoinSeconds + .01);
+  assert.equal(w.companions[0], WEAPON_BALANCE.companionHP);
+  assert.equal(w.companionRespawnStartedAt[0], null);
+  assert.equal(fireWeapon(w, player, 6).shots.length, 6);
   assert.ok(companionPositions({ x: 22, y: 450 }, w).every((c) => c.x >= 10));
 });
 test('spread starts with a useful wider volley, scales to seventeen pellets, and freezes more often at rank seven', () => {
@@ -53,7 +73,7 @@ test('boosts refresh rather than stack and repair caps at max hull', () => {
   assert.equal(w.rapidUntil, 12);
   collectPickup(w, 'SHIELD', 100, 4); assert.equal(w.shieldUntil, 14);
   assert.equal(w.shieldHP, WEAPON_BALANCE.shieldTierHP[1]);
-  assert.equal(collectPickup(w, 'REPAIR', 90, 0).health, 100);
+  assert.equal(collectPickup(w, 'REPAIR', 190, 0).health, 200);
   const a = newWeaponState(), b = newWeaponState(); b.rapidUntil = 10;
   fireWeapon(a, player, 0); fireWeapon(b, player, 0);
   assert.ok(b.nextFireAt < a.nextFireAt);
@@ -147,23 +167,23 @@ test('rank-seven weapon drops become distinct mini-health pickups worth ten hull
 test('shield pickups repair, replace, expire into one shot per remaining HP, and break into a cone', () => {
   const w = newWeaponState();
   collectPickup(w, 'SHIELD', 100, 0);
-  assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP, w.shieldUntil], [1, 20, 20, 10]);
+  assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP, w.shieldUntil], [1, 100, 100, 10]);
   assert.equal(hasActiveShield(w, 9.99), true);
   collectPickup(w, 'SHIELD_3', 100, 1);
-  assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP, w.shieldUntil], [3, 55, 55, 11]);
+  assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP, w.shieldUntil], [3, 300, 300, 11]);
   absorbShieldHit(w, 10, 2);
   collectPickup(w, 'SHIELD_3', 100, 2);
-  assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP, w.shieldUntil], [3, 55, 55, 12],
+  assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP, w.shieldUntil], [3, 300, 300, 12],
     'a same-tier pickup fully repairs and refreshes the shield');
   absorbShieldHit(w, 19, 3);
-  assert.equal(w.shieldHP, 36);
+  assert.equal(w.shieldHP, 281);
   collectPickup(w, 'SHIELD_2', 100, 4);
-  assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP], [3, 55, 55], 'a lower tier repairs when remaining HP is above its full HP');
-  absorbShieldHit(w, 35, 5);
-  assert.equal(w.shieldHP, 20);
+  assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP], [3, 300, 300], 'a lower tier repairs when remaining HP is above its full HP');
+  absorbShieldHit(w, 210, 5);
+  assert.equal(w.shieldHP, 90);
   collectPickup(w, 'SHIELD', 100, 6);
-  assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP], [1, 20, 20], 'otherwise the lower tier replaces it at full HP');
-  absorbShieldHit(w, 17, 7);
+  assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP], [1, 100, 100], 'otherwise the lower tier replaces it at full HP');
+  absorbShieldHit(w, 97, 7);
   assert.equal(expireShield(w, 15.99), 0);
   assert.equal(expireShield(w, 16), 3);
   assert.deepEqual([w.shieldTier, w.shieldHP, w.shieldMaxHP, w.shieldUntil], [0, 0, 0, 0]);

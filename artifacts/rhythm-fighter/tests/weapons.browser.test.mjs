@@ -3,7 +3,7 @@ import { selectMockPlaylist } from './drivePlaylistFixture.mjs';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { chromium } from 'playwright-core';
-import { WEAPON_BALANCE } from '../src/weaponRules.ts';
+import { companionPositions, WEAPON_BALANCE } from '../src/weaponRules.ts';
 
 const url = process.env.RHYTHM_FIGHTER_TEST_URL || process.env.AUDIOSTRIKE_TEST_URL || 'http://localhost:80/';
 function silentWav() {
@@ -21,7 +21,7 @@ test('real pickups drive rank-seven weapons, shield, freeze, laser, bombs and re
     const page = await browser.newPage({ viewport: { width: 412, height: 915 } });
     const errors = []; page.on('pageerror', (error) => errors.push(error.message));
     await page.clock.install();
-    await page.addInitScript(() => { window.__RHYTHM_FIGHTER_TEST_MODE__ = true; });
+    await page.addInitScript(() => { window.__RHYTHM_FIGHTER_TEST_MODE__ = true; Math.random = () => .1; });
     assert.equal((await page.goto(url))?.status(), 200);
     await selectMockPlaylist(page, ['stage', 'boss'].map(kind => ({ name: `${kind}.mp3`, buffer: silentWav() })));
     await page.getByTestId('button-analyze').click();
@@ -32,6 +32,8 @@ test('real pickups drive rank-seven weapons, shield, freeze, laser, bombs and re
     assert.equal(preMatch.bossAnalysis.analyzed, true, 'boss song was decoded before the match');
     assert.equal(preMatch.stageAnalysis.motifCount, 8);
     assert.equal(preMatch.bossAnalysis.motifCount, 8);
+    assert.equal(preMatch.playerHealth, 200, 'the player starts with 200 hull');
+    assert.equal(preMatch.weapon.type, 'TWIN', 'this deterministic fixture starts with twin guns');
     const run = (fn, arg) => page.evaluate(fn, arg);
     const tick = (ms = 40) => page.clock.runFor(ms);
     const pickup = async (type) => {
@@ -52,10 +54,21 @@ test('real pickups drive rank-seven weapons, shield, freeze, laser, bombs and re
       const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
       api.enemyShot(p.x - 33, p.y + 8, 100);
     }); await tick();
-    assert.equal((await snap()).weapon.companions[0], 0, 'wingmen remain destructible');
+    let destroyed = await snap();
+    assert.equal(destroyed.weapon.companions[0], 0, 'enemy fire can destroy a wingman');
+    const respawnStartedAt = destroyed.weapon.companionRespawnStartedAt[0];
+    const offscreenShip = companionPositions(destroyed.player, destroyed.weapon, 420, respawnStartedAt, 900)[0];
+    assert.equal(offscreenShip.arriving, true);
+    assert.ok(offscreenShip.y > 900, 'the replacement starts below the arena');
+    const halfwayShip = companionPositions(destroyed.player, destroyed.weapon, 420,
+      respawnStartedAt + WEAPON_BALANCE.companionRejoinSeconds / 2, 900)[0];
+    assert.ok(halfwayShip.y < offscreenShip.y && halfwayShip.y > destroyed.player.y + 8);
+    await tick((WEAPON_BALANCE.companionRejoinSeconds + .05) * 1000);
+    assert.equal((await snap()).weapon.companions[0], WEAPON_BALANCE.companionHP,
+      'the replacement rejoins at full health');
     await run(() => window.__AUDIOSTRIKE_TEST__.setPlayer({ health: 30 }));
     await pickup('TWIN');
-    assert.deepEqual((await snap()).weapon.companions, [0, 90], 'rank-seven weapon drops convert instead of restoring weapons');
+    assert.deepEqual((await snap()).weapon.companions, [90, 90], 'rank-seven weapon drops stay converted after a wingman returns');
     assert.equal((await snap()).playerHealth, 40, 'a converted weapon drop restores ten hull');
     await run(() => {
       const api = window.__AUDIOSTRIKE_TEST__;
@@ -69,7 +82,7 @@ test('real pickups drive rank-seven weapons, shield, freeze, laser, bombs and re
     assert.ok((await snap()).weapon.weaponSwitchUntil > (await snap()).now);
     await pickup('REPAIR'); assert.equal((await snap()).playerHealth, 55);
     await pickup('REPAIR'); assert.equal((await snap()).playerHealth, 80);
-    await pickup('REPAIR'); assert.equal((await snap()).playerHealth, 100);
+    await pickup('REPAIR'); assert.equal((await snap()).playerHealth, 105);
     await pickup('RAPID'); await pickup('SHIELD');
     const shieldUntil = (await snap()).weapon.shieldUntil;
     assert.equal((await snap()).weapon.shieldHP, WEAPON_BALANCE.shieldTierHP[1]);
@@ -78,7 +91,7 @@ test('real pickups drive rank-seven weapons, shield, freeze, laser, bombs and re
       const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
       api.enemyShot(p.x, p.y, 5);
     }); await tick();
-    assert.equal((await snap()).playerHealth, 100, 'shield blocks incoming damage');
+    assert.equal((await snap()).playerHealth, 105, 'shield blocks incoming damage');
     assert.equal((await snap()).weapon.shieldHP, WEAPON_BALANCE.shieldTierHP[1] - 5);
     await tick((shieldUntil - (await snap()).now) * 1000 + 100);
     assert.ok((await snap()).now >= shieldUntil);
@@ -88,7 +101,7 @@ test('real pickups drive rank-seven weapons, shield, freeze, laser, bombs and re
       const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
       api.enemyShot(p.x, p.y, 5);
     }); await tick();
-    assert.equal((await snap()).playerHealth, 95, 'damage resumes after shield expiry');
+    assert.equal((await snap()).playerHealth, 100, 'damage resumes after shield expiry');
     await tick(4000);
     assert.doesNotMatch(await page.getByTestId('hud-weapon').innerText(), /Rapid/);
 
