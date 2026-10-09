@@ -16,3 +16,4 @@
 - [Durable song analyses](audiostrike-analysis-cache.md) — clip timing uses cached media playback duration, separate from sampled analysis and gameplay balance values.
 - [Shield-only hit protection](audiostrike-boss-damage-intent.md) — any connected damage hurts unless an active shield absorbs it; boss safe zones remain safe.
 - [API artifact health root](api-artifact-health-root.md) — test the API base path separately from `/api/healthz` and Google Drive routes.
+- [Projectile interaction rules](audiostrike-projectile-interactions.md) — player shots clear common enemy shots, continue to hull hits, and stop on targets; lasers persist through them.

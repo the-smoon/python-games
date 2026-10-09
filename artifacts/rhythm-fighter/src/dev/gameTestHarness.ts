@@ -5,7 +5,7 @@ import type { ActiveBoss, CombatArsenal, CombatWorld, FeatureSet, PlayerEntity, 
 import { blankLiveFeatures } from '../soundtrackLifecycle';
 import { levelPair, type LocalTrack } from '../playlistRules';
 import { playbackWindowFor } from '../playbackClips';
-import type { PickupType, WeaponState } from '../weaponRules';
+import type { PickupType, PlayerShot, WeaponState } from '../weaponRules';
 
 type PreparedTrack = LocalTrack & { url: string; features: FeatureSet };
 type SpectrumBand = 'bass' | 'bright';
@@ -25,6 +25,7 @@ export type RhythmFighterTestApi = {
   clearArena: () => void;
   spawnTarget: (x: number, y: number, health: number, subBoss?: boolean, speed?: number, fireRate?: number, projectile?: ProjectileKind) => void;
   enemyShot: (x: number, y: number, damage?: number, indestructible?: boolean) => void;
+  playerShot: (x: number, y: number, vy?: number) => void;
   setWeapon: (values: Partial<WeaponState>) => void;
   setBossPosition: (id: number, x: number, y: number) => void;
   setBossPhase: (id: number, phase: ActiveBoss['phase']) => void;
@@ -223,6 +224,12 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
       });
     },
     enemyShot: (x, y, damage = 5, indestructible = false) => runtime.makeEnemyShot(x, y, damage, indestructible),
+    playerShot: (x, y, vy = -48) => {
+      const game = runtime.getGame();
+      const shot: PlayerShot = { x, y, vx: 0, vy, alive: true, damage: 10, radius: 3,
+        freeze: false, weapon: 'TWIN', rank: 1 };
+      game.bullets.push(shot);
+    },
     setWeapon: (values) => Object.assign(runtime.getArsenal().weapon, values),
     freezeAt: (x, y) => runtime.freezeAt(x, y),
     setVolley: (value) => { runtime.getArsenal().weapon.volley = value; },

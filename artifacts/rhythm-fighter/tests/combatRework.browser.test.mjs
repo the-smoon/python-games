@@ -226,7 +226,31 @@ test('combat progression, shield expiry, hostile shots and collisions follow the
     await tick(40);
     assert.equal((await snap()).playerHealth, 90);
 
-    // Standard weapon shots remove ordinary bullets but leave marked boss hazards intact.
+    // Projectiles clear common bullets, keep travelling, and stop only when they hit an enemy.
+    await run(() => {
+      const api = window.__AUDIOSTRIKE_TEST__;
+      api.clearArena();
+      api.setPlayer({ x: 210, y: 760, vx: 0, vy: 0, health: 100000 });
+      api.setWeapon({ type: 'LASER', cooldownUntil: api.snapshot().now + 1, chargeStartedAt: null });
+      api.enemyShot(210, 490, 5, false);
+      api.enemyShot(210, 490, 5, true);
+      api.playerShot(210, 498);
+      api.spawnTarget(210, 360, 50);
+    });
+    await tick(40);
+    state = await snap();
+    const continuingShot = state.shots.find(shot => shot.weapon === 'TWIN' && shot.alive);
+    assert.ok(continuingShot && continuingShot.y < 498, 'the player shot survives the bullet collision and keeps moving');
+    assert.equal(state.enemyShots.filter(shot => shot.alive && !shot.indestructible).length, 0);
+    assert.equal(state.enemyShots.filter(shot => shot.alive && shot.indestructible).length, 1,
+      'special boss hazards remain indestructible');
+    await tick(400);
+    state = await snap();
+    assert.equal(state.enemies[0]?.health, 40, 'the travelling player shot reaches the enemy');
+    assert.equal(state.shots.some(shot => shot.weapon === 'TWIN' && shot.alive), false,
+      'a regular projectile stops after hitting the enemy');
+
+    // Standard weapon fire also clears ordinary bullets while leaving marked boss hazards intact.
     await run(() => {
       const api = window.__AUDIOSTRIKE_TEST__, p = api.snapshot().player;
       api.clearArena();

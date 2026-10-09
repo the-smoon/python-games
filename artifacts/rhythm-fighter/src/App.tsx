@@ -1224,18 +1224,13 @@ function Home() {
       for (const bullet of game.bullets) {
         if (!canAttack()) break;
         if (!bullet.alive) continue;
-        const intercepted = game.enemyBullets.find((shot) => shot.alive && !shot.indestructible &&
-          playerShotHitsTarget(bullet, shot));
-        if (intercepted) {
-          bullet.alive = false;
-          intercepted.alive = false;
-          spawnParticles(game.particles, intercepted.x, intercepted.y, '#b8f6ff', 4, 1, 4);
-          continue;
-        }
-        if (bullet.freeze) {
-          const hitShot = game.enemyBullets.find((shot) => shot.alive && !shot.indestructible && !shot.frozenUntil &&
-            Math.hypot(shot.x - bullet.x, shot.y - bullet.y) < shot.radius + bullet.radius);
-          if (hitShot) { splash(bullet.x, bullet.y); bullet.alive = false; continue; }
+        let clearedHostiles = 0;
+        for (const shot of game.enemyBullets) {
+          if (shot.alive && !shot.indestructible && playerShotHitsTarget(bullet, shot)) {
+            shot.alive = false;
+            if (clearedHostiles < 16) spawnParticles(game.particles, shot.x, shot.y, '#b8f6ff', 4, 1, 4);
+            clearedHostiles += 1;
+          }
         }
         for (const enemy of game.enemies) {
           if (!enemy.alive) continue;
