@@ -15,11 +15,11 @@ If the cache is unavailable, explicitly warn the player and use a fresh analysis
 
 **How to apply:** Keep request deadlines, validation, and read/write quotas around public cache access, and keep its failure messages separate from successful playback.
 
-Use the cached full-song `analyzedSeconds` when choosing a random playback window; do not reread media metadata as a separate pre-match step.
+Keep actual media `playbackDuration` separate from the analysis/gameplay `duration` and `analyzedSeconds`. Choose playback windows from `playbackDuration`; keep the analysis document intact when selecting a clip.
 
-**Why:** The user wants enemy design and clip selection to come from the full-song analysis prepared before gameplay, without an extra media load delaying or blocking playlist startup.
+**Why:** `analyzedSeconds` is the amount of audio sampled, while the existing gameplay duration has an 18-second floor for encounter balance. Neither is a safe clip boundary for a shorter file.
 
-**How to apply:** Carry the stored duration with each prepared track and choose each non-first clip window before starting the countdown; keep the first track anchored at zero.
+**How to apply:** Carry the actual playback duration with each prepared track and choose non-first clip bounds from it before the countdown; keep the first track anchored at zero. If cached document semantics change, bump its version so old documents cannot supply invalid clip metadata.
 
 Browser cache-reuse tests should verify that analysis is reused without another write, not require a fixed number of server reads; local browser storage can satisfy some entries while the shared API serves others.
 

@@ -264,10 +264,11 @@ components:
     SongAnalysisDocument:
       type: object
       additionalProperties: false
-      required: [version, duration, signature, motifs, analyzedSeconds]
+      required: [version, duration, playbackDuration, signature, motifs, analyzedSeconds]
       properties:
-        version: { type: integer, enum: [1] }
-        duration: { type: number, minimum: 1, maximum: 720 }
+        version: { type: integer, enum: [3] }
+        duration: { type: number, minimum: 18, maximum: 720 }
+        playbackDuration: { type: number, minimum: 0.001, maximum: 720 }
         analyzedSeconds: { type: number, minimum: 0.001, maximum: 720 }
         signature:
           $ref: "#/components/schemas/AudioFingerprint"
@@ -280,7 +281,7 @@ components:
     RunScoreInput:
       type: object
       additionalProperties: false
-      required: [runId, name, score, levelReached, bossLevelReached]
+      required: [runId, name, score, levelReached, bossLevelReached, playlistMetadata]
       properties:
         runId:
           type: string
@@ -302,10 +303,12 @@ components:
           type: [integer, "null"]
           minimum: 1
           maximum: 100000
+        playlistMetadata:
+          $ref: "#/components/schemas/RunPlaylistMetadata"
     RunScore:
       type: object
       additionalProperties: false
-      required: [id, runId, name, score, levelReached, bossLevelReached, createdAt]
+      required: [id, runId, name, score, levelReached, bossLevelReached, playlistMetadata, createdAt]
       properties:
         id:
           type: integer
@@ -326,9 +329,66 @@ components:
           type: [integer, "null"]
           minimum: 1
           maximum: 100000
+        playlistMetadata:
+          anyOf:
+            - $ref: "#/components/schemas/RunPlaylistMetadata"
+            - type: "null"
         createdAt:
           type: string
           format: date-time
+    RunPlaylistTrack:
+      type: object
+      additionalProperties: false
+      required: [trackId, title]
+      properties:
+        trackId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{1,200}$"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+    RunPlayedTrack:
+      type: object
+      additionalProperties: false
+      required: [trackId, title, startSeconds, endSeconds]
+      properties:
+        trackId:
+          type: string
+          pattern: "^[A-Za-z0-9_-]{1,200}$"
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        startSeconds:
+          type: number
+          minimum: 0
+          maximum: 720
+        endSeconds:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 720
+    RunPlaylistMetadata:
+      type: object
+      additionalProperties: false
+      required: [playlistName, intendedTrackOrder, tracksPlayed]
+      properties:
+        playlistName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        intendedTrackOrder:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/RunPlaylistTrack"
+        tracksPlayed:
+          type: array
+          minItems: 0
+          maxItems: 20
+          items:
+            $ref: "#/components/schemas/RunPlayedTrack"
     HealthStatus:
       type: object
       required: [status]

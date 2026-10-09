@@ -10,10 +10,15 @@ import type { SongAnalysisDocumentVersion } from './songAnalysisDocumentVersion'
 export interface SongAnalysisDocument {
   version: SongAnalysisDocumentVersion;
   /**
-     * @minimum 1
+     * @minimum 18
      * @maximum 720
      */
   duration: number;
+  /**
+     * @minimum 0.001
+     * @maximum 720
+     */
+  playbackDuration: number;
   /**
      * @minimum 0.001
      * @maximum 720

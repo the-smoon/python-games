@@ -11,6 +11,7 @@ export type GameState = 'UPLOAD' | 'ANALYZING' | 'COUNTDOWN' | 'PLAYING' | 'BOSS
 export type Behavior = 'PATROL' | 'ZIGZAG' | 'FORMATION' | 'SWARM' | 'DIVE' | 'SHOOTER' | 'TANK';
 export type FeatureSet = {
   duration: number;
+  playbackDuration: number;
   signature: AudioFingerprint;
   motifs: AudioFingerprint[];
   analyzedSeconds: number;

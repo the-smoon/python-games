@@ -4,6 +4,7 @@ import { encounterProgress } from '../gameRules';
 import type { ActiveBoss, CombatArsenal, CombatWorld, FeatureSet, PlayerEntity, ProjectileKind } from '../gameRuntimeTypes';
 import { blankLiveFeatures } from '../soundtrackLifecycle';
 import { levelPair, type LocalTrack } from '../playlistRules';
+import { playbackWindowFor } from '../playbackClips';
 import type { PickupType, WeaponState } from '../weaponRules';
 
 type PreparedTrack = LocalTrack & { url: string; features: FeatureSet };
@@ -114,12 +115,16 @@ export function installGameTestHarness(target: HarnessWindow, runtime: HarnessRu
         stageTime: (now - game.songStart) / 1000,
         stageAudioTime: runtime.getStageAudio()?.currentTime,
         stageAudioPaused: runtime.getStageAudio()?.paused,
+        stageAudioLoop: runtime.getStageAudio()?.loop,
+        stagePlaybackWindow: runtime.getStageAudio() ? playbackWindowFor(runtime.getStageAudio()!) : null,
         stageAudioSrc: runtime.getStageAudio()?.src,
         trackOrder: runtime.getPrepared().map((track) => track.title),
         stageTrackTitle: runtime.getPrepared().length ? levelPair(runtime.getPrepared(), game.level).stage.title : null,
         bossTrackTitle: runtime.getPrepared().length ? levelPair(runtime.getPrepared(), game.level).boss.title : null,
         bossAudioTime: runtime.getBossAudio()?.currentTime,
         bossAudioPaused: runtime.getBossAudio()?.paused,
+        bossAudioLoop: runtime.getBossAudio()?.loop,
+        bossPlaybackWindow: runtime.getBossAudio() ? playbackWindowFor(runtime.getBossAudio()!) : null,
         bossAudioSrc: runtime.getBossAudio()?.src,
         starY: runtime.stars[0]?.y,
         playerHealth: game.player.health,

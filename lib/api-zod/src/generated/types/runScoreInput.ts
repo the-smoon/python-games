@@ -4,6 +4,7 @@
  * Api
  * OpenAPI spec version: 0.2.0
  */
+import type { RunPlaylistMetadata } from './runPlaylistMetadata';
 
 export interface RunScoreInput {
   /** @pattern ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ */
@@ -30,4 +31,5 @@ export interface RunScoreInput {
      * @nullable
      */
   bossLevelReached: number | null;
+  playlistMetadata: RunPlaylistMetadata;
 }

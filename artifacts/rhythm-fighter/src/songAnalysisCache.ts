@@ -19,7 +19,7 @@ export async function prepareSong(file: File, inspect: Inspect, progress: (value
   const features = await inspect(file, progress);
   features.songKey = hash;
   if (features.analyzed) {
-    const document: SongAnalysisDocument = { version: 1, duration: features.duration,
+    const document: SongAnalysisDocument = { version: 3, duration: features.duration, playbackDuration: features.playbackDuration,
       signature: features.signature, motifs: features.motifs, analyzedSeconds: features.analyzedSeconds };
     try { await storeSongAnalysis(hash, document, request()); }
     catch { warning = 'Song analysis could not be saved; playback and live music reactions still work for this run.'; }

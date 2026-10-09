@@ -4,6 +4,7 @@
  * Api
  * OpenAPI spec version: 0.2.0
  */
+import type { RunPlaylistMetadata } from './runPlaylistMetadata';
 
 export interface RunScore {
   id: number;
@@ -26,5 +27,6 @@ export interface RunScore {
      * @nullable
      */
   bossLevelReached: number | null;
+  playlistMetadata: RunPlaylistMetadata | null;
   createdAt: Date;
 }

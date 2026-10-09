@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Crosshair, Gamepad2, Headphones, House, Pause, Play, RotateCcw, Volume2, Zap } from 'lucide-react';
+import { Crosshair, Gamepad2, Headphones, House, Pause, Play, RotateCcw, Volume2, X, Zap } from 'lucide-react';
 import { submitRunScore, type RunScoreInput } from '@workspace/api-client-react';
 import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
@@ -37,6 +37,9 @@ const COLORS: Record<string, string> = {
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const random = (min: number, max: number) => min + Math.random() * (max - min);
 const randomInt = (min: number, max: number) => Math.floor(random(min, max + 1));
+const CALLSIGN_WORDS = ['NEON', 'NOVA', 'PULSE', 'COMET', 'VECTOR', 'ORBIT'];
+const generateCallsign = () => `${CALLSIGN_WORDS[randomInt(0, CALLSIGN_WORDS.length - 1)]}-${randomInt(10, 99)}`;
+type UnsavedRunScore = Omit<RunScoreInput, 'name' | 'playlistMetadata'>;
 type PreparedSong = Awaited<ReturnType<typeof prepareSong>>;
 type SongPreparation = {
   file: File;
@@ -54,7 +57,8 @@ async function inspectAudio(file: File, progress: (value: number) => void): Prom
     progress(70);
     const analysis = analyzeMusic(Array.from({ length: decoded.numberOfChannels }, (_, channel) => decoded.getChannelData(channel)), decoded.sampleRate);
     progress(100);
-    return { duration: clamp(decoded.duration || 42, 18, 720), ...analysis, analyzed: true };
+    const playbackDuration = clamp(decoded.duration || 42, 0.001, 720);
+    return { duration: Math.max(18, playbackDuration), playbackDuration, ...analysis, analyzed: true };
   } catch {
     // Keep playback available for files the browser cannot decode for pre-analysis.
     const url = URL.createObjectURL(file);
@@ -67,14 +71,15 @@ async function inspectAudio(file: File, progress: (value: number) => void): Prom
     });
     URL.revokeObjectURL(url);
     const fallback = analyzeMusic([new Float32Array(512)], 22050);
-    return { duration: clamp(duration || 42, 18, 720), ...fallback, analyzed: false };
+    const playbackDuration = clamp(duration || 42, 0.001, 720);
+    return { duration: Math.max(18, playbackDuration), playbackDuration, ...fallback, analyzed: false };
   } finally {
     if (decoder && decoder.state !== 'closed') await decoder.close().catch(() => undefined);
   }
 }
 
 const fallbackFeatures = (duration: number): FeatureSet => ({
-  duration, signature: blankLiveFeatures(), motifs: Array.from({ length: 8 }, () => blankLiveFeatures()),
+  duration, playbackDuration: duration, signature: blankLiveFeatures(), motifs: Array.from({ length: 8 }, () => blankLiveFeatures()),
   analyzedSeconds: 0, analyzed: false,
 });
 
@@ -236,7 +241,7 @@ function Home() {
     bossLevelReached: null,
   });
   const activeRunIdRef = useRef<string | null>(null);
-  const finalRunRef = useRef<Omit<RunScoreInput, 'name'> | null>(null);
+  const finalRunRef = useRef<UnsavedRunScore | null>(null);
   const pendingScoreRunsRef = useRef(new Set<string>());
   const savedScoreRunsRef = useRef(new Set<string>());
   const soundtrackRef = useRef(new SoundtrackLifecycle());
@@ -266,6 +271,7 @@ function Home() {
     return (clock.since ?? performance.now()) - clock.total;
   }, []);
   const [playlistTracks, setPlaylistTracks] = useState<LocalTrack[]>([]);
+  const [playlistName, setPlaylistName] = useState('');
   const [previewTrackId, setPreviewTrackId] = useState<string | null>(null);
   const [songPreview, setSongPreview] = useState<SongPreviewState>({ trackId: '', status: 'idle' });
   const [randomOrder, setRandomOrder] = useState(false);
@@ -273,6 +279,8 @@ function Home() {
   const [playlistBusy, setPlaylistBusy] = useState(false);
   const preparedRef = useRef<(LocalTrack & { url: string; features: FeatureSet; playbackWindow: ReturnType<typeof createPlaybackWindow> })[]>([]);
   const preparedSongsRef = useRef(new Map<string, SongPreparation>());
+  const runPlaylistMetadataRef = useRef<RunScoreInput['playlistMetadata'] | null>(null);
+  const finalPlaylistMetadataRef = useRef<RunScoreInput['playlistMetadata'] | null>(null);
   const [stageProgress, setStageProgress] = useState(0);
   const [bossProgress, setBossProgress] = useState(0);
   const [analysisMessage, setAnalysisMessage] = useState('Waiting for stage track');
@@ -285,7 +293,7 @@ function Home() {
   const [musicWarning, setMusicWarning] = useState('');
   const [controllerStatus, setControllerStatus] = useState('Checking for controller…');
   const controllerStatusRef = useRef('Checking for controller…');
-  const [finalRun, setFinalRun] = useState<Omit<RunScoreInput, 'name'> | null>(null);
+  const [finalRun, setFinalRun] = useState<UnsavedRunScore | null>(null);
   const [scoreName, setScoreName] = useState('');
   const [scoreSaveState, setScoreSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
@@ -307,6 +315,8 @@ function Home() {
     if (gameRef.current.audioContext) void gameRef.current.audioContext.close();
     for (const track of preparedRef.current) URL.revokeObjectURL(track.url);
     preparedRef.current = [];
+    runPlaylistMetadataRef.current = null;
+    finalPlaylistMetadataRef.current = null;
     stageAudioRef.current = null;
     bossAudioRef.current = null;
     gameRef.current.audioContext = null;
@@ -366,6 +376,22 @@ function Home() {
 
   const playTrack = useCallback((element: HTMLAudioElement, name: string) => {
     void element.play().then(() => {
+      const game = gameRef.current;
+      const metadata = runPlaylistMetadataRef.current;
+      if (metadata && activeRunIdRef.current &&
+        ['PLAYING', 'BOSS_INTRO', 'BOSS'].includes(game.state)) {
+        const source = element.currentSrc || element.src;
+        const track = preparedRef.current.find((candidate) => candidate.url === source);
+        if (track && !metadata.tracksPlayed.some((played) => played.trackId === track.id)) {
+          const window = playbackWindowFor(element);
+          metadata.tracksPlayed.push({
+            trackId: track.id,
+            title: track.title,
+            startSeconds: window?.startSeconds ?? 0,
+            endSeconds: window?.endSeconds ?? track.features.playbackDuration,
+          });
+        }
+      }
       setAudioError(gameRef.current.audioContext?.state === 'suspended'
         ? 'Sound is blocked by the browser. Tap Retry audio.' : '');
     }).catch(() => {
@@ -438,13 +464,11 @@ function Home() {
         });
         if (prepared.warning) setMusicWarning(prepared.warning);
         const url = URL.createObjectURL(track.file);
-        const duration = randomClips && prepared.features.analyzedSeconds > 0
-          ? prepared.features.analyzedSeconds : prepared.features.duration;
         preparedRef.current.push({
           ...track,
-          features: { ...prepared.features, duration },
+          features: prepared.features,
           url,
-          playbackWindow: createPlaybackWindow(duration, randomClips, index === 0),
+          playbackWindow: createPlaybackWindow(prepared.features.playbackDuration, randomClips, index === 0),
         });
       }
       if (preparedRef.current.some((track) => !track.features.analyzed)) {
@@ -482,9 +506,17 @@ function Home() {
     const game = gameRef.current;
     if (rerollPlaybackClips && randomClips) {
       preparedRef.current.forEach((track, index) => {
-        track.playbackWindow = createPlaybackWindow(track.features.duration, true, index === 0);
+        track.playbackWindow = createPlaybackWindow(track.features.playbackDuration, true, index === 0);
       });
     }
+    const safePlaylistName = playlistName.trim()
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, 80) || 'Custom playlist';
+    runPlaylistMetadataRef.current = {
+      playlistName: safePlaylistName,
+      intendedTrackOrder: preparedRef.current.map(({ id, title }) => ({ trackId: id, title })),
+      tracksPlayed: [],
+    };
+    finalPlaylistMetadataRef.current = null;
     for (const boss of encountersRef.current.bosses) releaseBossAudio(boss);
     encountersRef.current.reset();
     soundtrackRef.current.clear();
@@ -521,7 +553,7 @@ function Home() {
       playTrack(stageAudioRef.current, 'Stage track');
     }
     syncState('COUNTDOWN');
-  }, [playTrack, resumeAudio, syncState, loadLevelTracks, randomClips]);
+  }, [playTrack, resumeAudio, syncState, loadLevelTracks, randomClips, playlistName]);
 
   const returnToMainMenu = useCallback(() => {
     const pointerId = joystickRef.current.pointerId;
@@ -838,9 +870,15 @@ function Home() {
         levelReached: Math.max(runProgressRef.current.levelReached, game.level),
         bossLevelReached: runProgressRef.current.bossLevelReached,
       };
+      const runMetadata = runPlaylistMetadataRef.current;
+      finalPlaylistMetadataRef.current = runMetadata ? {
+        playlistName: runMetadata.playlistName,
+        intendedTrackOrder: runMetadata.intendedTrackOrder.map((track) => ({ ...track })),
+        tracksPlayed: runMetadata.tracksPlayed.map((track) => ({ ...track })),
+      } : null;
       finalRunRef.current = summary;
       setFinalRun(summary);
-      setScoreName('');
+      setScoreName(generateCallsign());
       setScoreSaveState('idle');
       joystickRef.current = neutralJoystick();
       arsenalRef.current.beam = null;
@@ -1410,13 +1448,15 @@ function Home() {
   const handleSaveRunScore = useCallback(async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const run = finalRunRef.current;
+    const playlistMetadata = finalPlaylistMetadataRef.current;
     const name = scoreName.trim();
-    if (!run || !name || pendingScoreRunsRef.current.has(run.runId) || savedScoreRunsRef.current.has(run.runId)) return;
+    if (!run || !playlistMetadata || !name ||
+      pendingScoreRunsRef.current.has(run.runId) || savedScoreRunsRef.current.has(run.runId)) return;
 
     pendingScoreRunsRef.current.add(run.runId);
     setScoreSaveState('saving');
     try {
-      await submitRunScore({ ...run, name });
+      await submitRunScore({ ...run, name, playlistMetadata });
       savedScoreRunsRef.current.add(run.runId);
       if (finalRunRef.current?.runId === run.runId) setScoreSaveState('saved');
     } catch {
@@ -1488,7 +1528,8 @@ function Home() {
               <>
                 <PlaylistSetup tracks={playlistTracks} onTracks={setPlaylistTracks} random={randomOrder} onRandom={setRandomOrder}
                   randomClips={randomClips} onRandomClips={setRandomClips} onBusy={setPlaylistBusy}
-                  selectedTrackId={selectedPreviewTrack?.id ?? null} onSelectTrack={setPreviewTrackId} preview={songPreview} />
+                  selectedTrackId={selectedPreviewTrack?.id ?? null} onSelectTrack={setPreviewTrackId} preview={songPreview}
+                  playlistName={playlistName} onPlaylistName={setPlaylistName} />
                 <button onClick={startAnalysis} disabled={!canStart} className="action-button mt-5 flex w-full items-center justify-center gap-3 rounded-xl border border-cyan-300/50 bg-cyan-300/10 py-4 font-mono text-xs font-bold uppercase tracking-[.2em] text-cyan-200 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/50 disabled:text-slate-600" data-testid="button-analyze"><Crosshair className="h-4 w-4" /> Analyze and play</button>
                 {musicWarning && <p role="alert" className="mt-3 text-sm text-amber-200">{musicWarning}</p>}
             <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-slate-600"><Volume2 className="h-3 w-3" /> Shared Drive MP3 library</div>
@@ -1561,16 +1602,33 @@ function Home() {
               </p>
               <form className="mt-5" onSubmit={handleSaveRunScore}>
                 <label htmlFor="run-score-name" className="mb-2 block font-mono text-[10px] uppercase tracking-[.16em] text-cyan-200">Enter a callsign to save this run</label>
-                <input
-                  id="run-score-name"
-                  className="w-full rounded-md border border-cyan-300/40 bg-slate-950/80 px-3 py-2 text-center font-mono text-sm text-white outline-none focus:border-cyan-200 focus:ring-2 focus:ring-cyan-300/30"
-                  value={scoreName}
-                  onChange={(event) => setScoreName(event.currentTarget.value)}
-                  maxLength={24}
-                  autoComplete="nickname"
-                  aria-label="Name for saved run score"
-                  data-testid="input-run-score-name"
-                />
+                <div className="flex gap-2">
+                  <input
+                    id="run-score-name"
+                    className="min-w-0 flex-1 rounded-md border border-cyan-300/40 bg-slate-950/80 px-3 py-2 text-center font-mono text-sm text-white outline-none focus:border-cyan-200 focus:ring-2 focus:ring-cyan-300/30"
+                    value={scoreName}
+                    onChange={(event) => {
+                      setScoreName(event.currentTarget.value);
+                      if (scoreSaveState === 'error') setScoreSaveState('idle');
+                    }}
+                    maxLength={24}
+                    autoComplete="nickname"
+                    aria-label="Name for saved run score"
+                    data-testid="input-run-score-name"
+                  />
+                  <button
+                    type="button"
+                    className="action-button inline-flex w-10 shrink-0 items-center justify-center rounded-md border border-slate-600 bg-slate-950/80 text-slate-300 hover:border-cyan-300/50 hover:text-cyan-200 disabled:opacity-40"
+                    aria-label="Clear callsign"
+                    title="Clear callsign"
+                    disabled={!scoreName || scoreSaveState === 'saving' || scoreSaveState === 'saved'}
+                    onClick={() => {
+                      setScoreName('');
+                      if (scoreSaveState === 'error') setScoreSaveState('idle');
+                    }}
+                    data-testid="button-clear-run-score-name"
+                  ><X className="h-4 w-4" aria-hidden="true" /></button>
+                </div>
                 <p className="mt-1 font-mono text-[9px] text-slate-500">Up to 24 characters</p>
                 <p className="mt-2 min-h-4 font-mono text-[10px] text-cyan-200" role="status" aria-live="polite" data-testid="status-run-score">
                   {scoreSaveState === 'saving' && 'Saving run…'}

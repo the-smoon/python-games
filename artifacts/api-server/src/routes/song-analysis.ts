@@ -4,7 +4,7 @@ import { db, songAnalysisTable } from "@workspace/db";
 import { GetSongAnalysisParams, GetSongAnalysisResponse, StoreSongAnalysisBody, StoreSongAnalysisParams } from "@workspace/api-zod";
 
 const router = Router();
-const VERSION = 1;
+const VERSION = 3;
 const quotas = new Map<string, { since: number; reads: number; writes: number }>();
 let globalWindow = Date.now(), globalWrites = 0, active = 0;
 const limit: RequestHandler = (req, res, next) => {

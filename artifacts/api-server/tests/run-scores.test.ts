@@ -11,6 +11,11 @@ type ScoreInput = {
   score: number;
   levelReached: number;
   bossLevelReached: number | null;
+  playlistMetadata: {
+    playlistName: string;
+    intendedTrackOrder: { trackId: string; title: string }[];
+    tracksPlayed: { trackId: string; title: string; startSeconds: number; endSeconds: number }[];
+  };
 };
 
 function memoryStore() {
@@ -21,6 +26,7 @@ function memoryStore() {
     score: number;
     levelReached: number;
     bossLevelReached: number | null;
+    playlistMetadata: ScoreInput["playlistMetadata"];
     createdAt: Date;
   }>();
   let writes = 0;
@@ -61,6 +67,14 @@ function input(runId: string, overrides: Partial<ScoreInput> = {}): ScoreInput {
     score: 7654321,
     levelReached: 5,
     bossLevelReached: 4,
+    playlistMetadata: {
+      playlistName: "Arcade set",
+      intendedTrackOrder: [
+        { trackId: "track-a", title: "Stage song" },
+        { trackId: "track-b", title: "Boss song" },
+      ],
+      tracksPlayed: [{ trackId: "track-a", title: "Stage song", startSeconds: 0, endSeconds: 30 }],
+    },
     ...overrides,
   };
 }
@@ -83,6 +97,7 @@ test("saves a run once and returns the original score for duplicate run IDs", as
     assert.equal(first.body.name, "NEON PILOT");
     assert.equal(first.body.levelReached, 5);
     assert.equal(first.body.bossLevelReached, 4);
+    assert.deepEqual(first.body.playlistMetadata, input(runId).playlistMetadata);
 
     const duplicate = await send(baseUrl, input(runId, { name: "CHANGED NAME", score: 1 }));
     assert.equal(duplicate.response.status, 200);
@@ -103,6 +118,30 @@ test("rejects cross-origin, invalid scores, and invalid display names before sav
     assert.equal((await send(baseUrl, input(runId, { score: -1 }))).response.status, 400);
     assert.equal((await send(baseUrl, input(runId, { name: "N".repeat(25) }))).response.status, 400);
     assert.equal((await send(baseUrl, input(runId, { name: "BAD\u0000NAME" }))).response.status, 400);
+    assert.equal(store.writes, 0);
+  });
+});
+
+test("rejects inconsistent playlist clips and tracks not in the intended order", async () => {
+  const store = memoryStore();
+  const runId = "c4f2e6a1-9b74-4c20-8fd3-50a123456789";
+  await withApi(store.save, async baseUrl => {
+    const reversed = input(runId, {
+      playlistMetadata: {
+        playlistName: "Broken",
+        intendedTrackOrder: [{ trackId: "track-a", title: "Stage song" }],
+        tracksPlayed: [{ trackId: "track-a", title: "Stage song", startSeconds: 20, endSeconds: 10 }],
+      },
+    });
+    const notInOrder = input(runId, {
+      playlistMetadata: {
+        playlistName: "Broken",
+        intendedTrackOrder: [{ trackId: "track-a", title: "Stage song" }],
+        tracksPlayed: [{ trackId: "track-b", title: "Not in order", startSeconds: 0, endSeconds: 10 }],
+      },
+    });
+    assert.equal((await send(baseUrl, reversed)).response.status, 400);
+    assert.equal((await send(baseUrl, notInOrder)).response.status, 400);
     assert.equal(store.writes, 0);
   });
 });

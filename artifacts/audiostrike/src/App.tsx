@@ -45,7 +45,8 @@ async function inspectAudio(file: File, progress: (value: number) => void): Prom
     progress(70);
     const analysis = analyzeMusic(Array.from({ length: decoded.numberOfChannels }, (_, channel) => decoded.getChannelData(channel)), decoded.sampleRate);
     progress(100);
-    return { duration: clamp(decoded.duration || 42, 18, 180), ...analysis, analyzed: true };
+    const playbackDuration = clamp(decoded.duration || 42, 0.001, 720);
+    return { duration: clamp(decoded.duration || 42, 18, 180), playbackDuration, ...analysis, analyzed: true };
   } catch {
     // Keep playback available for files the browser cannot decode for pre-analysis.
     const url = URL.createObjectURL(file);
@@ -58,14 +59,15 @@ async function inspectAudio(file: File, progress: (value: number) => void): Prom
     });
     URL.revokeObjectURL(url);
     const fallback = analyzeMusic([new Float32Array(512)], 22050);
-    return { duration: clamp(duration || 42, 18, 180), ...fallback, analyzed: false };
+    const playbackDuration = clamp(duration || 42, 0.001, 720);
+    return { duration: clamp(duration || 42, 18, 180), playbackDuration, ...fallback, analyzed: false };
   } finally {
     if (decoder && decoder.state !== 'closed') await decoder.close().catch(() => undefined);
   }
 }
 
 const fallbackFeatures = (duration: number): FeatureSet => ({
-  duration, signature: blankLiveFeatures(), motifs: Array.from({ length: 8 }, () => blankLiveFeatures()),
+  duration, playbackDuration: duration, signature: blankLiveFeatures(), motifs: Array.from({ length: 8 }, () => blankLiveFeatures()),
   analyzedSeconds: 0, analyzed: false,
 });
 
@@ -247,6 +249,7 @@ function Home() {
     return (clock.since ?? performance.now()) - clock.total;
   }, []);
   const [playlistTracks, setPlaylistTracks] = useState<LocalTrack[]>([]);
+  const [playlistName, setPlaylistName] = useState('');
   const [randomOrder, setRandomOrder] = useState(false);
   const [playlistBusy, setPlaylistBusy] = useState(false);
   const preparedRef = useRef<(LocalTrack & { url: string; features: FeatureSet })[]>([]);
@@ -262,6 +265,7 @@ function Home() {
   const [musicWarning, setMusicWarning] = useState('');
   const [controllerStatus, setControllerStatus] = useState('Checking for controller…');
   const controllerStatusRef = useRef('Checking for controller…');
+  const runPlaylistMetadataRef = useRef<RunScoreInput['playlistMetadata'] | null>(null);
   const [finalRun, setFinalRun] = useState<Omit<RunScoreInput, 'name'> | null>(null);
   const [scoreName, setScoreName] = useState('');
   const [scoreSaveState, setScoreSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -284,6 +288,7 @@ function Home() {
     if (gameRef.current.audioContext) void gameRef.current.audioContext.close();
     for (const track of preparedRef.current) URL.revokeObjectURL(track.url);
     preparedRef.current = [];
+    runPlaylistMetadataRef.current = null;
     stageAudioRef.current = null;
     bossAudioRef.current = null;
     gameRef.current.audioContext = null;
@@ -315,6 +320,20 @@ function Home() {
 
   const playTrack = useCallback((element: HTMLAudioElement, name: string) => {
     void element.play().then(() => {
+      const game = gameRef.current;
+      const metadata = runPlaylistMetadataRef.current;
+      if (metadata && activeRunIdRef.current && ['COUNTDOWN', 'PLAYING', 'BOSS_INTRO', 'BOSS'].includes(game.state)) {
+        const source = element.currentSrc || element.src;
+        const track = preparedRef.current.find((candidate) => candidate.url === source);
+        if (track && !metadata.tracksPlayed.some((played) => played.trackId === track.id)) {
+          metadata.tracksPlayed.push({
+            trackId: track.id,
+            title: track.title,
+            startSeconds: 0,
+            endSeconds: track.features.playbackDuration,
+          });
+        }
+      }
       setAudioError(gameRef.current.audioContext?.state === 'suspended'
         ? 'Sound is blocked by the browser. Tap Retry audio.' : '');
     }).catch(() => {
@@ -427,6 +446,11 @@ function Home() {
     pauseRef.current = { since: null, total: 0, tracks: [] };
     setPaused(false); setBossHud([]); setBossSecondsLeft(30);
     activeRunIdRef.current = crypto.randomUUID();
+    runPlaylistMetadataRef.current = {
+      playlistName: playlistName.trim() || 'Custom playlist',
+      intendedTrackOrder: preparedRef.current.map(({ id, title }) => ({ trackId: id, title })),
+      tracksPlayed: [],
+    };
     finalRunRef.current = null;
     runProgressRef.current = { levelReached: 1, bossLevelReached: null };
     setFinalRun(null);
@@ -457,7 +481,7 @@ function Home() {
       playTrack(stageAudioRef.current, 'Stage track');
     }
     syncState('COUNTDOWN');
-  }, [playTrack, resumeAudio, syncState, loadLevelTracks]);
+  }, [playTrack, resumeAudio, syncState, loadLevelTracks, playlistName]);
 
   useEffect(() => {
     const updateControllerStatus = () => {
@@ -703,6 +727,17 @@ function Home() {
         score: game.score,
         levelReached: Math.max(runProgressRef.current.levelReached, game.level),
         bossLevelReached: runProgressRef.current.bossLevelReached,
+        playlistMetadata: runPlaylistMetadataRef.current
+          ? {
+              ...runPlaylistMetadataRef.current,
+              intendedTrackOrder: runPlaylistMetadataRef.current.intendedTrackOrder.map((track) => ({ ...track })),
+              tracksPlayed: runPlaylistMetadataRef.current.tracksPlayed.map((track) => ({ ...track })),
+            }
+          : {
+              playlistName: playlistName.trim() || 'Custom playlist',
+              intendedTrackOrder: preparedRef.current.map(({ id, title }) => ({ trackId: id, title })),
+              tracksPlayed: [],
+            },
       };
       finalRunRef.current = summary;
       setFinalRun(summary);
@@ -1235,7 +1270,8 @@ function Home() {
               </div>
             ) : (
               <>
-                <PlaylistSetup tracks={playlistTracks} onTracks={setPlaylistTracks} random={randomOrder} onRandom={setRandomOrder} onBusy={setPlaylistBusy} />
+                <PlaylistSetup tracks={playlistTracks} onTracks={setPlaylistTracks} playlistName={playlistName}
+                  onPlaylistName={setPlaylistName} random={randomOrder} onRandom={setRandomOrder} onBusy={setPlaylistBusy} />
                 <button onClick={startAnalysis} disabled={!canStart} className="action-button mt-5 flex w-full items-center justify-center gap-3 rounded-xl border border-cyan-300/50 bg-cyan-300/10 py-4 font-mono text-xs font-bold uppercase tracking-[.2em] text-cyan-200 disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900/50 disabled:text-slate-600" data-testid="button-analyze"><Crosshair className="h-4 w-4" /> Analyze and play</button>
                 {musicWarning && <p role="alert" className="mt-3 text-sm text-amber-200">{musicWarning}</p>}
             <div className="mt-5 flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[.14em] text-slate-600"><Volume2 className="h-3 w-3" /> Shared Drive MP3 library</div>

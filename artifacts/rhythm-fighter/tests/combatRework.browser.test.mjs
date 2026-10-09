@@ -45,7 +45,7 @@ test('cached analysis survives reload; boss damage, buffs and death effects work
       const result = await page.request.get(`${url}api/song-analysis/${hash}`);
       assert.equal(result.status(), 200, 'analysis persisted in the shared database');
       const document = await result.json();
-      assert.equal(document.version, 1); assert.equal(document.motifs.length, 8);
+      assert.equal(document.version, 3); assert.equal(document.motifs.length, 8);
       assert.equal('audio' in document, false);
     }
     await selectMockPlaylist(page, files); cacheCalls.length = 0;

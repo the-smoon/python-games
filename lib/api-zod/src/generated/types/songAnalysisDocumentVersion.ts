@@ -9,5 +9,5 @@ export type SongAnalysisDocumentVersion = typeof SongAnalysisDocumentVersion[key
 
 
 export const SongAnalysisDocumentVersion = {
-  NUMBER_1: 1,
+  NUMBER_3: 3,
 } as const;

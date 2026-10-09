@@ -88,6 +88,18 @@ export function createRunScoresRouter(save: SaveRunScore = saveRunScore) {
       return;
     }
 
+    const metadata = parsed.data.playlistMetadata;
+    const intendedTrackIds = metadata.intendedTrackOrder.map((track) => track.trackId);
+    const intendedSet = new Set(intendedTrackIds);
+    const playedTrackIds = metadata.tracksPlayed.map((track) => track.trackId);
+    if (intendedSet.size !== intendedTrackIds.length ||
+      new Set(playedTrackIds).size !== playedTrackIds.length ||
+      metadata.tracksPlayed.some((track) =>
+        !intendedSet.has(track.trackId) || track.endSeconds <= track.startSeconds)) {
+      res.status(400).json({ error: "Invalid playlist metadata." });
+      return;
+    }
+
     const name = parsed.data.name.trim();
     if (!name || /[\u0000-\u001f\u007f-\u009f]/.test(name)) {
       res.status(400).json({ error: "Enter a display name without control characters." });

@@ -4,6 +4,7 @@ export type PlaybackWindow = Readonly<{ startSeconds: number; endSeconds: number
 
 const windows = new WeakMap<HTMLAudioElement, PlaybackWindow>();
 const listeners = new WeakSet<HTMLAudioElement>();
+const finished = new WeakSet<HTMLAudioElement>();
 
 export function createPlaybackWindow(
   duration: number,
@@ -22,10 +23,13 @@ export function createPlaybackWindow(
 }
 
 export function setPlaybackWindow(audio: HTMLAudioElement, window: PlaybackWindow | null) {
+  finished.delete(audio);
   if (window) windows.set(audio, window);
   else windows.delete(audio);
+  // Clipped tracks are one-shot segments. Full tracks keep their existing loop.
+  audio.loop = window === null;
   if (!listeners.has(audio)) {
-    audio.addEventListener('timeupdate', () => wrapPlaybackWindow(audio));
+    audio.addEventListener('timeupdate', () => stopPlaybackWindowAtEnd(audio));
     listeners.add(audio);
   }
   if (audio.readyState > 0) {
@@ -42,23 +46,24 @@ export function playbackWindowFor(audio: HTMLAudioElement): PlaybackWindow | nul
 }
 
 export function seekToPlaybackStart(audio: HTMLAudioElement) {
+  finished.delete(audio);
   const window = windows.get(audio);
   if (audio.readyState > 0) audio.currentTime = window?.startSeconds ?? 0;
 }
 
-export function wrapPlaybackWindow(audio: HTMLAudioElement): boolean {
+export function stopPlaybackWindowAtEnd(audio: HTMLAudioElement): boolean {
   const window = windows.get(audio);
-  if (!window || audio.currentTime < window.endSeconds - 0.04) return false;
-  audio.currentTime = window.startSeconds;
+  if (!window || finished.has(audio) || audio.currentTime < window.endSeconds - 0.04) return false;
+  finished.add(audio);
+  audio.pause();
+  audio.currentTime = window.endSeconds;
   return true;
 }
 
 export function playbackTimeForElapsed(elapsedSeconds: number, duration: number, window: PlaybackWindow | null) {
   if (!Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) return window?.startSeconds ?? 0;
   if (window) {
-    const clipLength = window.endSeconds - window.startSeconds;
-    if (clipLength <= 0) return window.startSeconds;
-    return window.startSeconds + elapsedSeconds % clipLength;
+    return Math.min(window.startSeconds + elapsedSeconds, window.endSeconds);
   }
   return Number.isFinite(duration) && duration > 0 ? elapsedSeconds % duration : 0;
 }

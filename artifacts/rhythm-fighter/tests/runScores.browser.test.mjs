@@ -55,6 +55,7 @@ test('game over allows replay without saving and retains a bounded callsign for 
 
     assert.equal((await page.goto(url))?.status(), 200);
     await selectMockPlaylist(page, [{ name: 'stage.mp3', buffer: toneWav(110) }, { name: 'boss.mp3', buffer: toneWav(880) }]);
+    await page.getByTestId('input-playlist-name').fill('Flight mix');
     await page.getByTestId('button-analyze').click();
     await page.waitForFunction(() => window.__AUDIOSTRIKE_TEST__?.snapshot().state === 'PLAYING');
 
@@ -65,7 +66,12 @@ test('game over allows replay without saving and retains a bounded callsign for 
     await page.getByTestId('overlay-game-over').waitFor();
     assert.equal((await page.getByTestId('text-final-run-score').innerText()).toLowerCase(), 'final score 12345');
     assert.match(await page.getByTestId('text-run-progress').innerText(), /Level reached 1.*No boss reached/i);
-    assert.equal(await page.getByTestId('button-save-run-score').isDisabled(), true);
+    assert.equal(await page.getByTestId('button-save-run-score').isDisabled(), false,
+      'the generated callsign makes the voluntary save control available immediately');
+    const firstSuggestion = page.getByTestId('input-run-score-name');
+    assert.match(await firstSuggestion.inputValue(), /^[A-Z]+-\d{2}$/);
+    await page.getByTestId('button-clear-run-score-name').click();
+    assert.equal(await firstSuggestion.inputValue(), '');
 
     await page.getByTestId('button-replay-game-over').click();
     await page.clock.runFor(4000);
@@ -83,6 +89,9 @@ test('game over allows replay without saving and retains a bounded callsign for 
     await page.getByTestId('overlay-game-over').waitFor();
     const name = page.getByTestId('input-run-score-name');
     assert.equal(await name.getAttribute('maxlength'), '24');
+    assert.match(await name.inputValue(), /^[A-Z]+-\d{2}$/);
+    await page.getByTestId('button-clear-run-score-name').click();
+    assert.equal(await name.inputValue(), '');
     await name.fill('  NEON PILOT  ');
     assert.equal(await name.inputValue(), '  NEON PILOT  ');
     await page.getByTestId('button-save-run-score').click();
@@ -99,11 +108,22 @@ test('game over allows replay without saving and retains a bounded callsign for 
       score: submissions[0].score,
       levelReached: submissions[0].levelReached,
       bossLevelReached: submissions[0].bossLevelReached,
+      playlistMetadata: submissions[0].playlistMetadata,
     }, {
       name: 'NEON PILOT',
       score: 98765,
       levelReached: 1,
       bossLevelReached: null,
+      playlistMetadata: {
+        playlistName: 'Flight mix',
+        intendedTrackOrder: [
+          { trackId: 'fixture-0', title: 'stage.mp3' },
+          { trackId: 'fixture-1', title: 'boss.mp3' },
+        ],
+        tracksPlayed: [
+          { trackId: 'fixture-0', title: 'stage.mp3', startSeconds: 0, endSeconds: 1 },
+        ],
+      },
     });
     assert.equal(await page.getByTestId('button-save-run-score').count(), 0, 'a saved run cannot be submitted again from the UI');
     await page.getByTestId('button-return-main-menu').click();

@@ -27,7 +27,7 @@ test('playlist previews refresh from saved song analyses and do not change the r
     ].map((song) => {
       const hash = createHash('sha256').update(song.bytes).digest('hex');
       const document = {
-        version: 1, duration: 2, analyzedSeconds: 2, signature: song.signature,
+        version: 3, duration: 18, playbackDuration: 2, analyzedSeconds: 2, signature: song.signature,
         motifs: Array.from({ length: 8 }, (_, i) => ({ ...song.signature, centroid: Math.max(0, Math.min(1, song.signature.centroid + i * .005)) })),
       };
       return { ...song, hash, document };

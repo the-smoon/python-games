@@ -109,7 +109,7 @@ test('bright onset motifs select one readable seeker shot with bounded homing', 
   assert.equal(frozen.seekSecondsLeft, .72, 'frozen time does not consume the steering window');
 });
 
-test('random playback clips keep the first track at zero and wrap elapsed time inside later 30-second windows', () => {
+test('first clips start at zero, later clips use the full track duration, and short tracks fit once', () => {
   assert.equal(createPlaybackWindow(80, false, false), null);
   let randomCalls = 0;
   const first = createPlaybackWindow(80, true, true, () => { randomCalls += 1; return .8; });
@@ -117,24 +117,34 @@ test('random playback clips keep the first track at zero and wrap elapsed time i
   assert.equal(randomCalls, 0);
   const later = createPlaybackWindow(80, true, false, () => .5);
   assert.deepEqual(later, { startSeconds: 25, endSeconds: 55 });
-  assert.equal(playbackTimeForElapsed(35, 80, later), 30);
+  assert.deepEqual(createPlaybackWindow(80, true, false, () => 1), { startSeconds: 50, endSeconds: 80 });
+  assert.equal(playbackTimeForElapsed(35, 80, later), 55);
+  assert.equal(playbackTimeForElapsed(10, 80, later), 35);
   assert.deepEqual(createPlaybackWindow(12, true, false, () => .75), { startSeconds: 0, endSeconds: 12 });
 });
 
-test('audio playback loops back to its selected clip start instead of the beginning of the file', () => {
+test('clip playback stops at its selected end while full-track playback retains looping', () => {
   const events = {};
   const audio = {
     readyState: 1,
     currentTime: 0,
+    loop: true,
+    pauseCount: 0,
+    pause() { this.pauseCount += 1; },
     addEventListener(name, listener) { events[name] = listener; },
   };
   setPlaybackWindow(audio, { startSeconds: 25, endSeconds: 55 });
   assert.equal(audio.currentTime, 25);
+  assert.equal(audio.loop, false);
   audio.currentTime = 55;
   events.timeupdate();
-  assert.equal(audio.currentTime, 25);
+  assert.equal(audio.currentTime, 55);
+  assert.equal(audio.pauseCount, 1);
+  events.timeupdate();
+  assert.equal(audio.pauseCount, 1, 'repeated time updates do not restart or re-stop a finished clip');
   setPlaybackWindow(audio, null);
   assert.equal(audio.currentTime, 0);
+  assert.equal(audio.loop, true);
 });
 
 test('pixel bursts radiate in all directions and boss debris splits into bounded generations', () => {

@@ -52,16 +52,21 @@ export type SongAnalysisDocumentVersion = typeof SongAnalysisDocumentVersion[key
 
 
 export const SongAnalysisDocumentVersion = {
-  NUMBER_1: 1,
+  NUMBER_3: 3,
 } as const;
 
 export interface SongAnalysisDocument {
   version: SongAnalysisDocumentVersion;
   /**
-     * @minimum 1
+     * @minimum 18
      * @maximum 720
      */
   duration: number;
+  /**
+     * @minimum 0.001
+     * @maximum 720
+     */
+  playbackDuration: number;
   /**
      * @minimum 0.001
      * @maximum 720
@@ -73,6 +78,54 @@ export interface SongAnalysisDocument {
      * @maxItems 8
      */
   motifs: AudioFingerprint[];
+}
+
+export interface RunPlaylistTrack {
+  /** @pattern ^[A-Za-z0-9_-]{1,200}$ */
+  trackId: string;
+  /**
+     * @minLength 1
+     * @maxLength 255
+     */
+  title: string;
+}
+
+export interface RunPlayedTrack {
+  /** @pattern ^[A-Za-z0-9_-]{1,200}$ */
+  trackId: string;
+  /**
+     * @minLength 1
+     * @maxLength 255
+     */
+  title: string;
+  /**
+     * @minimum 0
+     * @maximum 720
+     */
+  startSeconds: number;
+  /**
+     * @maximum 720
+     * @exclusiveMinimum 0
+     */
+  endSeconds: number;
+}
+
+export interface RunPlaylistMetadata {
+  /**
+     * @minLength 1
+     * @maxLength 80
+     */
+  playlistName: string;
+  /**
+     * @minItems 1
+     * @maxItems 20
+     */
+  intendedTrackOrder: RunPlaylistTrack[];
+  /**
+     * @minItems 0
+     * @maxItems 20
+     */
+  tracksPlayed: RunPlayedTrack[];
 }
 
 export interface RunScoreInput {
@@ -100,6 +153,7 @@ export interface RunScoreInput {
      * @nullable
      */
   bossLevelReached: number | null;
+  playlistMetadata: RunPlaylistMetadata;
 }
 
 export interface RunScore {
@@ -123,6 +177,7 @@ export interface RunScore {
      * @nullable
      */
   bossLevelReached: number | null;
+  playlistMetadata: RunPlaylistMetadata | null;
   createdAt: string;
 }
 

@@ -31,7 +31,11 @@ export const GetSongAnalysisParams = zod.object({
   "hash": zod.coerce.string().regex(getSongAnalysisPathHashRegExp)
 })
 
+export const getSongAnalysisResponseDurationMin = 18;
 export const getSongAnalysisResponseDurationMax = 720;
+
+export const getSongAnalysisResponsePlaybackDurationMin = 0.001;
+export const getSongAnalysisResponsePlaybackDurationMax = 720;
 
 export const getSongAnalysisResponseAnalyzedSecondsMin = 0.001;
 export const getSongAnalysisResponseAnalyzedSecondsMax = 720;
@@ -90,8 +94,9 @@ export const getSongAnalysisResponseMotifsMax = 8;
 
 
 export const GetSongAnalysisResponse = zod.object({
-  "version": zod.literal(1),
-  "duration": zod.number().min(1).max(getSongAnalysisResponseDurationMax),
+  "version": zod.literal(3),
+  "duration": zod.number().min(getSongAnalysisResponseDurationMin).max(getSongAnalysisResponseDurationMax),
+  "playbackDuration": zod.number().min(getSongAnalysisResponsePlaybackDurationMin).max(getSongAnalysisResponsePlaybackDurationMax),
   "analyzedSeconds": zod.number().min(getSongAnalysisResponseAnalyzedSecondsMin).max(getSongAnalysisResponseAnalyzedSecondsMax),
   "signature": zod.object({
   "rms": zod.number().min(getSongAnalysisResponseSignatureRmsMin).max(getSongAnalysisResponseSignatureRmsMax),
@@ -125,7 +130,11 @@ export const StoreSongAnalysisParams = zod.object({
   "hash": zod.coerce.string().regex(storeSongAnalysisPathHashRegExp)
 })
 
+export const storeSongAnalysisBodyDurationMin = 18;
 export const storeSongAnalysisBodyDurationMax = 720;
+
+export const storeSongAnalysisBodyPlaybackDurationMin = 0.001;
+export const storeSongAnalysisBodyPlaybackDurationMax = 720;
 
 export const storeSongAnalysisBodyAnalyzedSecondsMin = 0.001;
 export const storeSongAnalysisBodyAnalyzedSecondsMax = 720;
@@ -184,8 +193,9 @@ export const storeSongAnalysisBodyMotifsMax = 8;
 
 
 export const StoreSongAnalysisBody = zod.object({
-  "version": zod.literal(1),
-  "duration": zod.number().min(1).max(storeSongAnalysisBodyDurationMax),
+  "version": zod.literal(3),
+  "duration": zod.number().min(storeSongAnalysisBodyDurationMin).max(storeSongAnalysisBodyDurationMax),
+  "playbackDuration": zod.number().min(storeSongAnalysisBodyPlaybackDurationMin).max(storeSongAnalysisBodyPlaybackDurationMax),
   "analyzedSeconds": zod.number().min(storeSongAnalysisBodyAnalyzedSecondsMin).max(storeSongAnalysisBodyAnalyzedSecondsMax),
   "signature": zod.object({
   "rms": zod.number().min(storeSongAnalysisBodySignatureRmsMin).max(storeSongAnalysisBodySignatureRmsMax),
@@ -211,7 +221,11 @@ export const StoreSongAnalysisBody = zod.object({
 })).min(storeSongAnalysisBodyMotifsMin).max(storeSongAnalysisBodyMotifsMax)
 })
 
+export const storeSongAnalysisResponseDurationMin = 18;
 export const storeSongAnalysisResponseDurationMax = 720;
+
+export const storeSongAnalysisResponsePlaybackDurationMin = 0.001;
+export const storeSongAnalysisResponsePlaybackDurationMax = 720;
 
 export const storeSongAnalysisResponseAnalyzedSecondsMin = 0.001;
 export const storeSongAnalysisResponseAnalyzedSecondsMax = 720;
@@ -270,8 +284,9 @@ export const storeSongAnalysisResponseMotifsMax = 8;
 
 
 export const StoreSongAnalysisResponse = zod.object({
-  "version": zod.literal(1),
-  "duration": zod.number().min(1).max(storeSongAnalysisResponseDurationMax),
+  "version": zod.literal(3),
+  "duration": zod.number().min(storeSongAnalysisResponseDurationMin).max(storeSongAnalysisResponseDurationMax),
+  "playbackDuration": zod.number().min(storeSongAnalysisResponsePlaybackDurationMin).max(storeSongAnalysisResponsePlaybackDurationMax),
   "analyzedSeconds": zod.number().min(storeSongAnalysisResponseAnalyzedSecondsMin).max(storeSongAnalysisResponseAnalyzedSecondsMax),
   "signature": zod.object({
   "rms": zod.number().min(storeSongAnalysisResponseSignatureRmsMin).max(storeSongAnalysisResponseSignatureRmsMax),
@@ -308,6 +323,25 @@ export const submitRunScoreBodyLevelReachedMax = 100000;
 
 export const submitRunScoreBodyBossLevelReachedMax = 100000;
 
+export const submitRunScoreBodyPlaylistMetadataPlaylistNameMax = 80;
+
+export const submitRunScoreBodyPlaylistMetadataIntendedTrackOrderItemTrackIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,200}$');
+export const submitRunScoreBodyPlaylistMetadataIntendedTrackOrderItemTitleMax = 255;
+
+export const submitRunScoreBodyPlaylistMetadataIntendedTrackOrderMax = 20;
+
+export const submitRunScoreBodyPlaylistMetadataTracksPlayedItemTrackIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,200}$');
+export const submitRunScoreBodyPlaylistMetadataTracksPlayedItemTitleMax = 255;
+
+export const submitRunScoreBodyPlaylistMetadataTracksPlayedItemStartSecondsMin = 0;
+export const submitRunScoreBodyPlaylistMetadataTracksPlayedItemStartSecondsMax = 720;
+
+export const submitRunScoreBodyPlaylistMetadataTracksPlayedItemEndSecondsExclusiveMin = 0;
+export const submitRunScoreBodyPlaylistMetadataTracksPlayedItemEndSecondsMax = 720;
+
+export const submitRunScoreBodyPlaylistMetadataTracksPlayedMin = 0;
+export const submitRunScoreBodyPlaylistMetadataTracksPlayedMax = 20;
+
 
 
 export const SubmitRunScoreBody = zod.object({
@@ -315,7 +349,20 @@ export const SubmitRunScoreBody = zod.object({
   "name": zod.string().min(1).max(submitRunScoreBodyNameMax).describe('Player-selected display name without control characters'),
   "score": zod.number().min(submitRunScoreBodyScoreMin).max(submitRunScoreBodyScoreMax),
   "levelReached": zod.number().min(1).max(submitRunScoreBodyLevelReachedMax),
-  "bossLevelReached": zod.number().min(1).max(submitRunScoreBodyBossLevelReachedMax).nullable()
+  "bossLevelReached": zod.number().min(1).max(submitRunScoreBodyBossLevelReachedMax).nullable(),
+  "playlistMetadata": zod.object({
+  "playlistName": zod.string().min(1).max(submitRunScoreBodyPlaylistMetadataPlaylistNameMax),
+  "intendedTrackOrder": zod.array(zod.object({
+  "trackId": zod.string().regex(submitRunScoreBodyPlaylistMetadataIntendedTrackOrderItemTrackIdRegExp),
+  "title": zod.string().min(1).max(submitRunScoreBodyPlaylistMetadataIntendedTrackOrderItemTitleMax)
+})).min(1).max(submitRunScoreBodyPlaylistMetadataIntendedTrackOrderMax),
+  "tracksPlayed": zod.array(zod.object({
+  "trackId": zod.string().regex(submitRunScoreBodyPlaylistMetadataTracksPlayedItemTrackIdRegExp),
+  "title": zod.string().min(1).max(submitRunScoreBodyPlaylistMetadataTracksPlayedItemTitleMax),
+  "startSeconds": zod.number().min(submitRunScoreBodyPlaylistMetadataTracksPlayedItemStartSecondsMin).max(submitRunScoreBodyPlaylistMetadataTracksPlayedItemStartSecondsMax),
+  "endSeconds": zod.number().gt(submitRunScoreBodyPlaylistMetadataTracksPlayedItemEndSecondsExclusiveMin).max(submitRunScoreBodyPlaylistMetadataTracksPlayedItemEndSecondsMax)
+})).min(submitRunScoreBodyPlaylistMetadataTracksPlayedMin).max(submitRunScoreBodyPlaylistMetadataTracksPlayedMax)
+})
 })
 
 export const submitRunScoreResponseRunIdRegExp = new RegExp('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
@@ -326,6 +373,25 @@ export const submitRunScoreResponseLevelReachedMax = 100000;
 
 export const submitRunScoreResponseBossLevelReachedMax = 100000;
 
+export const submitRunScoreResponsePlaylistMetadataOnePlaylistNameMax = 80;
+
+export const submitRunScoreResponsePlaylistMetadataOneIntendedTrackOrderItemTrackIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,200}$');
+export const submitRunScoreResponsePlaylistMetadataOneIntendedTrackOrderItemTitleMax = 255;
+
+export const submitRunScoreResponsePlaylistMetadataOneIntendedTrackOrderMax = 20;
+
+export const submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemTrackIdRegExp = new RegExp('^[A-Za-z0-9_-]{1,200}$');
+export const submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemTitleMax = 255;
+
+export const submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemStartSecondsMin = 0;
+export const submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemStartSecondsMax = 720;
+
+export const submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemEndSecondsExclusiveMin = 0;
+export const submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemEndSecondsMax = 720;
+
+export const submitRunScoreResponsePlaylistMetadataOneTracksPlayedMin = 0;
+export const submitRunScoreResponsePlaylistMetadataOneTracksPlayedMax = 20;
+
 
 
 export const SubmitRunScoreResponse = zod.object({
@@ -335,6 +401,19 @@ export const SubmitRunScoreResponse = zod.object({
   "score": zod.number().min(submitRunScoreResponseScoreMin).max(submitRunScoreResponseScoreMax),
   "levelReached": zod.number().min(1).max(submitRunScoreResponseLevelReachedMax),
   "bossLevelReached": zod.number().min(1).max(submitRunScoreResponseBossLevelReachedMax).nullable(),
+  "playlistMetadata": zod.union([zod.object({
+  "playlistName": zod.string().min(1).max(submitRunScoreResponsePlaylistMetadataOnePlaylistNameMax),
+  "intendedTrackOrder": zod.array(zod.object({
+  "trackId": zod.string().regex(submitRunScoreResponsePlaylistMetadataOneIntendedTrackOrderItemTrackIdRegExp),
+  "title": zod.string().min(1).max(submitRunScoreResponsePlaylistMetadataOneIntendedTrackOrderItemTitleMax)
+})).min(1).max(submitRunScoreResponsePlaylistMetadataOneIntendedTrackOrderMax),
+  "tracksPlayed": zod.array(zod.object({
+  "trackId": zod.string().regex(submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemTrackIdRegExp),
+  "title": zod.string().min(1).max(submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemTitleMax),
+  "startSeconds": zod.number().min(submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemStartSecondsMin).max(submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemStartSecondsMax),
+  "endSeconds": zod.number().gt(submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemEndSecondsExclusiveMin).max(submitRunScoreResponsePlaylistMetadataOneTracksPlayedItemEndSecondsMax)
+})).min(submitRunScoreResponsePlaylistMetadataOneTracksPlayedMin).max(submitRunScoreResponsePlaylistMetadataOneTracksPlayedMax)
+}),zod.null()]),
   "createdAt": zod.coerce.date()
 })
 

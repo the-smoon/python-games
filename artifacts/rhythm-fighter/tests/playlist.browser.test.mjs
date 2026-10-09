@@ -99,6 +99,12 @@ test('Drive picker recovery, shared save/load, ordering, one-time shuffle, odd w
       assert.equal(first.bossTrackTitle, order[1] ?? order[0]);
       assert.equal(first.stageAnalysis.analyzed, true);
       assert.equal(first.bossAnalysis.analyzed, true);
+      if (mode === 'random') {
+        assert.deepEqual(first.stagePlaybackWindow, { startSeconds: 0, endSeconds: 1 },
+          'the first short track uses its opening once');
+        assert.equal(first.stageAudioLoop, false);
+        assert.equal(first.bossAudioLoop, false);
+      }
       for (let level = 2; level <= 4; level++) {
         await page.clock.fastForward((STAGE_LEVEL_SECONDS + 0.1) * 1000);
         await page.clock.runFor(BOSS_ARRIVAL_SECONDS * 1000 + 200);
@@ -112,6 +118,7 @@ test('Drive picker recovery, shared save/load, ordering, one-time shuffle, odd w
         assert.equal(next.bossTrackTitle, order[((level - 1) * 2 + 1) % order.length]);
         assert.equal(next.stageAudioPaused, false);
         assert.equal(next.bossAudioPaused, true);
+        if (mode === 'random') assert.equal(next.stageAudioLoop, false);
         assert.deepEqual(next.trackOrder, order, 'never reshuffle between levels');
         if (level === 2 && mode !== 'single') {
           assert.notEqual(next.stageAudioSrc, first.stageAudioSrc);

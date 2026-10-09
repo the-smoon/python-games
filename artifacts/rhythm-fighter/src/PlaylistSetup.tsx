@@ -37,11 +37,12 @@ async function downloadTrack(id: string, title: string, used: number, signal: Ab
   return { id, title, file: new File([blob], `${title}.mp3`, { type: 'audio/mpeg' }) };
 }
 
-function Setup({ tracks, onTracks, random, onRandom, randomClips, onRandomClips, onBusy, selectedTrackId, onSelectTrack, preview }: {
+function Setup({ tracks, onTracks, random, onRandom, randomClips, onRandomClips, onBusy, selectedTrackId, onSelectTrack, preview, playlistName, onPlaylistName }: {
   tracks: LocalTrack[]; onTracks: (tracks: LocalTrack[]) => void;
   random: boolean; onRandom: (value: boolean) => void; onBusy: (value: boolean) => void;
   randomClips: boolean; onRandomClips: (value: boolean) => void;
   selectedTrackId: string | null; onSelectTrack: (id: string) => void; preview: SongPreviewState;
+  playlistName: string; onPlaylistName: (name: string) => void;
 }) {
   const qc = useQueryClient();
   const library = useGetMusicLibrary();
@@ -50,7 +51,6 @@ function Setup({ tracks, onTracks, random, onRandom, randomClips, onRandomClips,
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
-  const [name, setName] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const active = useRef<AbortController | null>(null);
   const tracksRef = useRef(tracks);
@@ -101,12 +101,12 @@ function Setup({ tracks, onTracks, random, onRandom, randomClips, onRandomClips,
         const local = await downloadTrack(t.id, t.title, used, signal);
         used += local.file.size; out.push(local);
       }
-      onTracks(out); setName(list.name);
+       onTracks(out); onPlaylistName(list.name);
       setStatus(`Loaded "${list.name}" with ${out.length} tracks.`);
     }, 'Loading playlist...');
   };
   const save = () => {
-    const trimmed = name.trim();
+    const trimmed = playlistName.trim();
     if (!trimmed || !tracks.length) return;
     void run(async (signal) => {
       try {
@@ -206,9 +206,9 @@ function Setup({ tracks, onTracks, random, onRandom, randomClips, onRandomClips,
         <p className="mt-3 text-xs text-slate-400">Adjacent tracks become stage/boss pairs. The end wraps to the first track, including odd-length lists. One track plays both roles. Replay keeps the same order.</p>
         <label className={`${label} mt-4`} htmlFor="playlist-name">Playlist name</label>
         <div className="mt-2 flex gap-2">
-          <input id="playlist-name" data-testid="input-playlist-name" className={field} maxLength={80} value={name} disabled={busy}
-            onChange={(e) => setName(e.target.value)} placeholder="Name this playlist" />
-          <button type="button" className={button} data-testid="button-save-playlist" disabled={busy || !name.trim()} onClick={save}>Save</button>
+          <input id="playlist-name" data-testid="input-playlist-name" className={field} maxLength={80} value={playlistName} disabled={busy}
+            onChange={(e) => onPlaylistName(e.target.value)} placeholder="Name this playlist" />
+          <button type="button" className={button} data-testid="button-save-playlist" disabled={busy || !playlistName.trim()} onClick={save}>Save</button>
         </div>
       </>}
     </div>
