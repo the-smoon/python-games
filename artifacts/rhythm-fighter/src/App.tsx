@@ -4,7 +4,7 @@ import { submitRunScore, type RunScoreInput } from '@workspace/api-client-react'
 import { advanceBossDeath, advanceProjectiles, attackInterval, bossPhase, configureGameplayAudio, damageBoss, enemyShotHitsPlayer, nextLevel, playerShotHitsTarget, stageProgress as getStageProgress, STAGE_LEVEL_SECONDS, BOSS_ARRIVAL_SECONDS } from './gameRules';
 import { getControllerStatus, mapGamepadInput, neutralControllerVector, selectActiveGamepad } from './gamepadControls';
 import { audioIntensity, blendAudioSignals, bossHealth, chooseAttack, chooseMotion, generateForm, spawnProfile } from './encounterRules';
-import { absorbShieldHit, advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, convertWeaponPickupsAtMaxRank, enemyDropChance, expireShield, fireWeapon, freezeSplash, hasActiveShield, insideForwardShieldCone, isWeaponPickup, laserHitsTarget, newWeaponState, pickDrop, slowScale, tickFrozenBullet, WEAPON_BALANCE, type PickupType } from './weaponRules';
+import { absorbShieldHit, advanceCompanionRespawns, advancePickup, bombDamage, clearLaserHits, collectPickup, companionPositions, convertWeaponPickupsAtMaxRank, damageCompanion, enemyDropChance, expireShield, fireWeapon, freezeSplash, hasActiveShield, insideForwardShieldCone, isWeaponPickup, laserHitsTarget, newWeaponState, pickDrop, randomStartingWeapon, slowScale, tickFrozenBullet, WEAPON_BALANCE, type PickupType } from './weaponRules';
 import WeaponHUD from './WeaponHUD';
 import { drawFrozenHalo, drawWeaponEffects } from './weaponVisuals';
 import { analyzeMusic } from './musicAnalysis';
@@ -23,7 +23,7 @@ import { createSongDesign, songSpawnIdentity, songSectionAtTime } from './songDe
 import { prepareSong } from './songAnalysisCache';
 import type { SongPreviewState } from './SongDesignPreview';
 import { createPlaybackWindow, playbackTimeForElapsed, playbackWindowFor, seekToPlaybackStart, setPlaybackWindow } from './playbackClips';
-const PLAYER_MAX_HEALTH = 100;
+const PLAYER_MAX_HEALTH = WEAPON_BALANCE.maxHealth;
 const PLAYER_MAX_SPEED = 6.875;
 const PLAYER_ACCELERATION = .42;
 const PLAYER_DECELERATION = .55;
@@ -530,9 +530,10 @@ function Home() {
     setScoreSaveState('idle');
     game.level = 1;
     loadLevelTracks(1);
-    arsenalRef.current = { weapon: newWeaponState(), drops: [], beam: null, splashes: [],
+    const startingWeapon = randomStartingWeapon();
+    arsenalRef.current = { weapon: newWeaponState(startingWeapon), drops: [], beam: null, splashes: [],
       bombUntil: 0, shieldBlastUntil: 0, message: '', messageUntil: 0, dropMisses: 0 };
-    setCombatHud({ weapon: newWeaponState(), now: 0, message: '', messageUntil: 0 });
+    setCombatHud({ weapon: newWeaponState(startingWeapon), now: 0, message: '', messageUntil: 0 });
     game.player = { x: W / 2, y: H / 2, vx: 0, vy: 0, health: PLAYER_MAX_HEALTH, fireTimer: 0, frame: 0 };
       game.enemies = []; game.bullets = []; game.enemyBullets = []; game.bossBeams = []; game.particles = []; game.debris = []; game.blasts = []; game.shockwaves = []; game.boss = null;
       game.score = 0; game.frame = 0; game.beatIndex = 0; game.spawnIndex = 0; game.spawnCooldown = 0; game.stageDone = false; game.bossArrivalAt = 0; game.introTimer = 0;
@@ -915,6 +916,7 @@ function Home() {
       if (game.state !== 'PLAYING' && game.state !== 'BOSS' && game.state !== 'BOSS_INTRO') return;
       const arsenal = arsenalRef.current;
       const now = gameNow() / 1000;
+      advanceCompanionRespawns(arsenal.weapon, now);
       const player = game.player;
       const shieldBreakEffects = () => {
         arsenal.shieldBlastUntil = now + .38;
@@ -1172,12 +1174,12 @@ function Home() {
         }
         if (enemy.y > H + 70) enemy.alive = false;
         const enemyOnScreen = enemy.y + enemy.radius >= 0 && enemy.y - enemy.radius <= H;
-        for (const companion of companionPositions(player, arsenal.weapon)) {
+        for (const companion of companionPositions(player, arsenal.weapon, W, now, H)) {
           if (!damageProtected() && enemy.alive && companion.health > 0 && !enemy.exiting &&
             enemyShotHitsPlayer(enemy, companion, 14, 20)) {
-            arsenal.weapon.companions[companion.index] = Math.max(0, companion.health - 14);
+            const destroyed = damageCompanion(arsenal.weapon, companion.index, 14, now);
             killEnemy(enemy, false);
-            spawnParticles(game.particles, companion.x, companion.y, '#ffe45e', 8);
+            spawnParticles(game.particles, companion.x, companion.y, '#ffe45e', destroyed ? 14 : 8);
           }
         }
         if (enemy.alive && !enemy.exiting && enemyOnScreen &&
@@ -1258,11 +1260,11 @@ function Home() {
       for (const bullet of game.enemyBullets) {
         if (!canAttack()) break;
         if (!bullet.alive || bullet.frozenUntil) continue;
-        for (const companion of companionPositions(player, arsenal.weapon)) {
+        for (const companion of companionPositions(player, arsenal.weapon, W, now, H)) {
           if (!damageProtected() && bullet.alive && companion.health > 0 && enemyShotHitsPlayer(bullet, companion, 14, 20)) {
             bullet.alive = false;
-            arsenal.weapon.companions[companion.index] = Math.max(0, companion.health - bullet.damage);
-            spawnParticles(game.particles, companion.x, companion.y, '#ffe45e', 5);
+            const destroyed = damageCompanion(arsenal.weapon, companion.index, bullet.damage, now);
+            spawnParticles(game.particles, companion.x, companion.y, '#ffe45e', destroyed ? 12 : 5);
           }
         }
         if (bullet.alive && enemyShotHitsPlayer(bullet, player, PLAYER_W, PLAYER_H)) {
@@ -1570,7 +1572,7 @@ function Home() {
                 </div>
               </div>}
               <p className="controller-status mb-2" data-testid="controller-status" aria-live="polite"><Gamepad2 className="h-3 w-3 shrink-0" />{controllerStatus}</p>
-              <div className="flex items-end justify-between gap-2"><div className="hull-status"><div className="mb-1 font-mono text-[8px] uppercase tracking-[.16em] text-slate-400">Hull integrity</div><div className={`whitespace-nowrap font-mono text-2xl font-bold ${hud.health <= 25 ? 'text-red-300' : hud.health <= 50 ? 'text-orange-300' : 'text-green-300'}`} data-testid="status-health">{hud.health} <span className="text-xs font-normal text-slate-400">/ {PLAYER_MAX_HEALTH}</span></div></div><div className="steering-hint flex items-center gap-2 font-mono text-[9px] uppercase tracking-[.14em] text-cyan-300/60"><Gamepad2 className="h-3 w-3" /> Touch, stick, or D-pad</div></div>
+              <div className="flex items-end justify-between gap-2"><div className="hull-status"><div className="mb-1 font-mono text-[8px] uppercase tracking-[.16em] text-slate-400">Hull integrity</div><div className={`whitespace-nowrap font-mono text-2xl font-bold ${hud.health <= PLAYER_MAX_HEALTH * .25 ? 'text-red-300' : hud.health <= PLAYER_MAX_HEALTH * .5 ? 'text-orange-300' : 'text-green-300'}`} data-testid="status-health">{hud.health} <span className="text-xs font-normal text-slate-400">/ {PLAYER_MAX_HEALTH}</span></div></div><div className="steering-hint flex items-center gap-2 font-mono text-[9px] uppercase tracking-[.14em] text-cyan-300/60"><Gamepad2 className="h-3 w-3" /> Touch, stick, or D-pad</div></div>
             </div>
             {musicWarning && <p className="mx-auto mb-3 max-w-md rounded border border-amber-400/30 bg-amber-950/30 px-3 py-2 text-center text-xs text-amber-200" role="status" data-testid="text-music-warning">{musicWarning}</p>}
             {audioError && !paused && <div className="audio-alert" role="alert"><span>{audioError}</span><button type="button" onClick={retryAudio} className="rounded border border-orange-300 px-2 py-1 font-bold text-orange-200">Retry audio</button></div>}

@@ -2,10 +2,11 @@ export type WeaponType = 'TWIN' | 'SPREAD' | 'LASER';
 export type ShieldPickupType = 'SHIELD' | 'SHIELD_2' | 'SHIELD_3';
 export type PickupType = WeaponType | 'RAPID' | ShieldPickupType | 'REPAIR' | 'MINI_REPAIR' | 'BOMB';
 export const WEAPON_BALANCE = {
-  maxRank: 7, maxHealth: 100, repairHP: 25, miniRepairHP: 10,
-  rapidSeconds: 10, shieldSeconds: 10, shieldTierHP: [0, 20, 35, 55] as const,
-  weaponSwitchSeconds: 30, rapidMultiplier: 1.5,
+  maxRank: 7, maxHealth: 200, repairHP: 25, miniRepairHP: 10,
+  rapidSeconds: 10, shieldSeconds: 10, shieldTierHP: [0, 100, 200, 300] as const,
+  weaponSwitchSeconds: 10, rapidMultiplier: 1.5,
   companionHP: 90, companionOffset: 33, companionDamageMultiplier: 2.5,
+  companionRejoinSeconds: .55,
   freezeSeconds: 3, freezeRadius: 48, slowMultiplier: .4,
   stoppedSpeed: .08, maxBullets: 320,
   weakEnemyDropChance: .025, strongEnemyDropBonus: .085, subBossDropChance: .25,
@@ -25,11 +26,13 @@ export const PICKUP_INFO: Record<PickupType, { label: string; glyph: string; col
   MINI_REPAIR: { label: 'Mini repair +10', glyph: '+10', color: '#b6ff5c' },
   BOMB: { label: 'Bomb', glyph: 'B', color: '#ff6286' },
 };
+const STARTING_WEAPONS = ['TWIN', 'SPREAD', 'LASER'] as const;
 export type WeaponState = {
   type: WeaponType; rank: number; nextFireAt: number; volley: number;
   chargeStartedAt: number | null; cooldownUntil: number;
   rapidUntil: number; shieldUntil: number; shieldHP: number; shieldMaxHP: number;
   shieldTier: 0 | 1 | 2 | 3; weaponSwitchUntil: number; companions: number[];
+  companionRespawnStartedAt: (number | null)[];
 };
 export type PlayerShot = {
   x: number; y: number; vx: number; vy: number; alive: boolean;
@@ -39,10 +42,14 @@ export type LaserBeam = { x: number; y: number; width: number; damage: number; u
 export type Pickup = { type: PickupType; x: number; y: number; expiresAt: number; alive: boolean };
 export type FreezeTarget = { x: number; y: number; radius: number; frozenUntil?: number; alive?: boolean };
 
-export function newWeaponState(): WeaponState {
-  return { type: 'TWIN', rank: 1, nextFireAt: 0, volley: 0, chargeStartedAt: null,
+export function randomStartingWeapon(random: () => number = Math.random): WeaponType {
+  const roll = Math.max(0, Math.min(.999999, random()));
+  return STARTING_WEAPONS[Math.floor(roll * STARTING_WEAPONS.length)];
+}
+export function newWeaponState(type: WeaponType = 'TWIN'): WeaponState {
+  return { type, rank: 1, nextFireAt: 0, volley: 0, chargeStartedAt: null,
     cooldownUntil: 0, rapidUntil: 0, shieldUntil: 0, shieldHP: 0, shieldMaxHP: 0,
-    shieldTier: 0, weaponSwitchUntil: 0, companions: [0, 0] };
+    shieldTier: 0, weaponSwitchUntil: 0, companions: [0, 0], companionRespawnStartedAt: [null, null] };
 }
 export function weaponStats(type: WeaponType, rank: number) {
   const r = Math.max(1, Math.min(WEAPON_BALANCE.maxRank, rank));
@@ -134,9 +141,11 @@ export function collectPickup(state: WeaponState, type: PickupType, health: numb
       state.type = type;
       state.weaponSwitchUntil = now + WEAPON_BALANCE.weaponSwitchSeconds;
       state.companions = [0, 0];
+      state.companionRespawnStartedAt = [null, null];
     }
     if (type === 'TWIN' && state.rank === WEAPON_BALANCE.maxRank) {
-      state.companions = state.companions.map((hp) => hp <= 0 ? WEAPON_BALANCE.companionHP : hp);
+      state.companions = state.companions.map((hp, index) =>
+        hp <= 0 && state.companionRespawnStartedAt[index] === null ? WEAPON_BALANCE.companionHP : hp);
     }
     state.nextFireAt = now; state.volley = 0;
     state.chargeStartedAt = null; state.cooldownUntil = 0;
@@ -146,11 +155,43 @@ export function collectPickup(state: WeaponState, type: PickupType, health: numb
   if (nextHealth > health) message += ` · +${nextHealth - health} HP`;
   return { health: nextHealth, message, bomb: type === 'BOMB' };
 }
-export function companionPositions(player: { x: number; y: number }, state: WeaponState, width = 420) {
-  return state.companions.map((health, index) => ({
-    x: Math.max(10, Math.min(width - 10, player.x + (index === 0 ? -1 : 1) * WEAPON_BALANCE.companionOffset)),
-    y: player.y + 8, health, index,
-  }));
+export function companionPositions(
+  player: { x: number; y: number }, state: WeaponState, width = 420, now = 0, height = 840,
+) {
+  return state.companions.map((health, index) => {
+    const respawnStartedAt = state.companionRespawnStartedAt[index] ?? null;
+    const arriving = respawnStartedAt !== null;
+    const arrivalProgress = arriving
+      ? Math.max(0, Math.min(1, (now - respawnStartedAt) / WEAPON_BALANCE.companionRejoinSeconds))
+      : 1;
+    const targetY = player.y + 8;
+    const spawnY = height + 25;
+    return {
+      x: Math.max(10, Math.min(width - 10, player.x + (index === 0 ? -1 : 1) * WEAPON_BALANCE.companionOffset)),
+      y: arriving ? spawnY + (targetY - spawnY) * arrivalProgress : targetY,
+      health, index, arriving, arrivalProgress,
+    };
+  });
+}
+export function damageCompanion(state: WeaponState, index: number, damage: number, now: number) {
+  const health = state.companions[index] ?? 0;
+  if (state.type !== 'TWIN' || state.rank < WEAPON_BALANCE.maxRank || health <= 0) return false;
+  const remaining = Math.max(0, health - Math.max(1, damage));
+  state.companions[index] = remaining;
+  if (remaining > 0) return false;
+  state.companionRespawnStartedAt[index] = now;
+  return true;
+}
+export function advanceCompanionRespawns(state: WeaponState, now: number) {
+  if (state.type !== 'TWIN' || state.rank < WEAPON_BALANCE.maxRank) return;
+  for (let index = 0; index < state.companions.length; index += 1) {
+    const startedAt = state.companionRespawnStartedAt[index];
+    if (state.companions[index] <= 0 && startedAt !== null &&
+      now - startedAt >= WEAPON_BALANCE.companionRejoinSeconds) {
+      state.companions[index] = WEAPON_BALANCE.companionHP;
+      state.companionRespawnStartedAt[index] = null;
+    }
+  }
 }
 export function fireWeapon(state: WeaponState, player: { x: number; y: number; vx: number; vy: number; debuffUntil?: number }, now: number) {
   const shots: PlayerShot[] = [];

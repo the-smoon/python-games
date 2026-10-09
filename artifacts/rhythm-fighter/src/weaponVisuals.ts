@@ -108,13 +108,14 @@ export function drawWeaponEffects(
 
     // companions
     if (weapon.type === 'TWIN') {
-      for (const c of companionPositions(player, weapon)) {
-        if (c.health <= 0) continue;
+      for (const c of companionPositions(player, weapon, ctx.canvas.width, now, ctx.canvas.height)) {
+        if (c.health <= 0 && !c.arriving) continue;
         const hit = c.health / WEAPON_BALANCE.companionHP;
         ctx.save();
+        ctx.globalAlpha = c.arriving ? .45 + c.arrivalProgress * .55 : 1;
         ctx.translate(c.x, c.y + Math.sin(now * 5 + c.index) * 1.5);
         ctx.fillStyle = '#10121f';
-        ctx.strokeStyle = hit < .4 ? '#ff6286' : '#ffe45e';
+        ctx.strokeStyle = c.arriving ? '#56e9ff' : hit < .4 ? '#ff6286' : '#ffe45e';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(0, -12); ctx.lineTo(8, 8); ctx.lineTo(0, 4); ctx.lineTo(-8, 8); ctx.closePath();
