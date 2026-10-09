@@ -15,3 +15,4 @@
 - [Geometric visuals and death effects](audiostrike-effects-intent.md) — clean forms, permanent composite boss hulls, bounded pixel/debris deaths, and non-boss disruption.
 - [Durable song analyses](audiostrike-analysis-cache.md) — clip timing uses cached media playback duration, separate from sampled analysis and gameplay balance values.
 - [Shield-only hit protection](audiostrike-boss-damage-intent.md) — any connected damage hurts unless an active shield absorbs it; boss safe zones remain safe.
+- [API artifact health root](api-artifact-health-root.md) — test the API base path separately from `/api/healthz` and Google Drive routes.
